@@ -19,8 +19,9 @@ assistant. **Bring your own model**: OpenAI, Anthropic, Google Gemini, OpenRoute
 * **Dashboard** – days to event, budget burn, RSVPs, tasks done, overspend / critical-path alerts.
 * **Budget** – line items with live server-side math; **simulator** sliders (guests, target, per-category price level) run the *same* engine in the browser.
 * **Timeline** – Gantt with critical path (red), dependency links, event-day marker, **drag a bar to shift it** → preview of every downstream task that moves → Accept/Reject.
-* **Vendors** – upload a PDF quote → extracted line items, hidden fees, payment schedule, cancellation terms, risk clauses (LLM + regex backstop) → totals **recomputed by code** and compared with the printed total → side-by-side **comparison matrix** that highlights items one vendor didn't quote.
+* **Vendors** – upload a PDF quote *or a photo/screenshot of one* (vision model) → extracted line items, hidden fees, payment schedule, cancellation terms, risk clauses (LLM + regex backstop) → totals **recomputed by code** and compared with the printed total → side-by-side **comparison matrix** that highlights items one vendor didn't quote, and one-click **Add to budget** from a quote.
 * **Assistant** – Supervisor → (Theme · Budget · Logistics · Vendor) specialists, parallel fan-out, deterministic merge, checkpoint per node (`agent_runs`). Attach a mood-board image for a hex palette.
+* **Live collaboration** – changes made by any collaborator appear instantly (Server-Sent Events carrying only "topic changed" signals; clients refetch through the normal authorised API; vendors only receive timeline signals).
 * **Guests / Team** – RSVPs & dietary needs; roles `owner / editor / viewer / vendor`; audit log.
 * Works **without any AI key**: starter timeline + benchmark budget are deterministic templates.
 
@@ -49,8 +50,8 @@ For Ollama: provider "Ollama (local)", base URL `http://localhost:11434/v1`, and
 ## Tests
 
 ```bash
-npm test                         # 108 unit + integration tests (needs Postgres, see TEST_DATABASE_URL)
-npx playwright test              # 9 browser E2E tests against a production build + fake LLM server
+npm test                         # 110 unit + integration tests (needs Postgres, see TEST_DATABASE_URL)
+npx playwright test              # 11 browser E2E tests against a production build + fake LLM server
 npm run build && npm run audit:security -- --url http://localhost:3000   # automated security audit
 ```
 
@@ -80,6 +81,6 @@ tests/{unit,integration,e2e}
 | Redis (Upstash) | Rate limiter behind a `RateLimitStore` interface, in-memory impl | Correct for one instance; implement the 1-method interface for Upstash before scaling horizontally. |
 | pgvector RAG | Not included | Nothing in the current features needs retrieval; add when you want cross-event "memory" or vendor knowledge bases. |
 | Supabase/NextAuth | Own email+password (scrypt) + signed httpOnly JWT cookie | Zero external services for local testing. |
-| Real-time sync | TanStack Query refetch-on-focus + invalidation | Add SSE/Redis pub-sub later. |
-| Scanned-PDF OCR | Text PDFs only (clear error for scans) | Vision-on-pages is a natural next step. |
+| Real-time sync | SSE change signals + TanStack Query invalidation (in-process bus behind a `Bus` interface) | Works on one instance; implement `Bus` over Redis pub-sub to scale out. |
+| Scanned quotes | Text PDFs parsed locally; scans/photos uploaded as images go to the vision model | Avoids a native OCR dependency. Scanned *PDFs* should be exported as images. |
 | Kanban | Gantt + status table | Gantt covers the brief's "Kanban/Gantt". |

@@ -29,7 +29,7 @@ export default function VendorsPage() {
   const upload = useMutation({
     mutationFn: () => {
       const f = fileRef.current?.files?.[0];
-      if (!f) throw new Error("Choose a PDF first");
+      if (!f) throw new Error("Choose a PDF or image first");
       const form = new FormData();
       form.set("file", f); form.set("name", meta.name); form.set("serviceType", meta.serviceType);
       return api<{ computed: { totalCents: number } }>(`/events/${eventId}/vendors/upload`, { form, llm: true });
@@ -38,6 +38,7 @@ export default function VendorsPage() {
   });
   const compare = useMutation({ mutationFn: () => api<{ comparison: QuoteComparison; terms: Record<string, QuoteTerms> }>(`/events/${eventId}/vendors/compare`, { body: { vendorIds: picked } }), onSuccess: setCmp });
   const patch = useMutation({ mutationFn: ({ id, ...b }: { id: string } & Record<string, unknown>) => api(`/events/${eventId}/vendors/${id}`, { method: "PATCH", body: b }), onSuccess: refresh });
+  const toBudget = useMutation({ mutationFn: (id: string) => api(`/events/${eventId}/vendors/${id}/to-budget`, { method: "POST", body: {} }), onSuccess: () => qc.invalidateQueries({ queryKey: ["budget", eventId] }) });
   const del = useMutation({ mutationFn: (id: string) => api(`/events/${eventId}/vendors/${id}`, { method: "DELETE" }), onSuccess: () => { refresh(); setPicked([]); } });
   const [manual, setManual] = useState({ name: "", serviceType: "" });
   const addManual = useMutation({ mutationFn: () => api(`/events/${eventId}/vendors`, { body: manual }), onSuccess: () => { setManual({ name: "", serviceType: "" }); refresh(); } });
@@ -50,12 +51,12 @@ export default function VendorsPage() {
     <div className="space-y-6">
       {canEdit && (
         <Card className="space-y-4">
-          <h2 className="flex items-center gap-2 text-lg font-semibold"><FileUp className="h-5 w-5 text-brand" /> Upload a vendor quote (PDF)</h2>
+          <h2 className="flex items-center gap-2 text-lg font-semibold"><FileUp className="h-5 w-5 text-brand" /> Upload a vendor quote (PDF or photo)</h2>
           <p className="text-sm text-muted">The AI extracts line items, hidden fees, payment schedule and risky clauses. Every total is then recalculated by code — never trusted from the model. Requires an AI key in <Link href="/settings" className="text-brand underline">settings</Link>.</p>
           <form className="grid items-end gap-3 sm:grid-cols-4" onSubmit={(e) => { e.preventDefault(); upload.mutate(); }}>
             <Field label="Vendor name (optional)"><input className="w-full" value={meta.name} onChange={(e) => setMeta({ ...meta, name: e.target.value })} /></Field>
             <Field label="Service type"><input className="w-full" placeholder="Catering" value={meta.serviceType} onChange={(e) => setMeta({ ...meta, serviceType: e.target.value })} /></Field>
-            <Field label="PDF"><input ref={fileRef} className="w-full text-xs" type="file" accept="application/pdf" required /></Field>
+            <Field label="PDF / image"><input ref={fileRef} className="w-full text-xs" type="file" accept="application/pdf,image/png,image/jpeg,image/webp" required /></Field>
             <Button loading={upload.isPending}>{upload.isPending ? "Reading quote…" : "Analyse quote"}</Button>
           </form>
           {upload.isPending && <Spinner label="Extracting terms and recalculating totals — this can take up to a minute…" />}
@@ -68,7 +69,7 @@ export default function VendorsPage() {
         <h2 className="text-lg font-semibold">Vendors</h2>
         <Button disabled={picked.length < 2} loading={compare.isPending} onClick={() => compare.mutate()}><GitCompare className="h-4 w-4" /> Compare {picked.length >= 2 ? `(${picked.length})` : ""}</Button>
       </div>
-      <ErrorNote error={compare.error ?? patch.error ?? del.error} />
+      <ErrorNote error={compare.error ?? patch.error ?? del.error ?? toBudget.error} />
       {vendors.length === 0 && <Card className="py-8 text-center text-muted">No vendors yet.</Card>}
       <div className="grid gap-4 md:grid-cols-2">
         {vendors.map((v) => {
@@ -88,6 +89,7 @@ export default function VendorsPage() {
               {v.parsedTerms?.computed?.warnings.map((w) => <p key={w} className="text-xs text-warn">{w}</p>)}
               <div className="flex items-center justify-between">
                 <select disabled={!canEdit} className="py-1 text-xs" value={v.status} onChange={(e) => patch.mutate({ id: v.id, status: e.target.value })}>{["researching", "quoted", "booked", "rejected"].map((s) => <option key={s}>{s}</option>)}</select>
+                {canEdit && v.quoteAmount != null && <Button variant="outline" size="sm" loading={toBudget.isPending && toBudget.variables === v.id} onClick={() => toBudget.mutate(v.id)}>{toBudget.isSuccess && toBudget.variables === v.id ? "Added ✓" : "Add to budget"}</Button>}
                 {canEdit && <Button variant="ghost" size="sm" onClick={() => del.mutate(v.id)} aria-label={`Delete ${v.name}`}><Trash2 className="h-4 w-4" /></Button>}
               </div>
             </Card>

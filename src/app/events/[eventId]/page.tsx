@@ -51,6 +51,13 @@ export default function Dashboard() {
         <Card className="border-bad/50"><p className="flex items-center gap-2 text-sm"><Flame className="h-4 w-4 text-bad" /> The current timeline runs <b>{tasks.data.overrunDays} day(s)</b> past the event date. Review the critical path on the Timeline tab.</p></Card>
       )}
 
+      {ev.theme && (
+        <Card className="flex flex-wrap items-center gap-4">
+          <div className="flex gap-2">{ev.theme.colors.map((c) => <div key={c.hex} className="text-center text-[10px] text-muted"><div className="h-9 w-9 rounded-lg border border-line" style={{ background: c.hex }} title={c.name} />{c.hex}</div>)}</div>
+          <p className="min-w-[200px] flex-1 text-sm text-muted">{ev.theme.summary}</p>
+        </Card>
+      )}
+
       <Card>
         <h2 className="mb-3 font-semibold">Up next</h2>
         {next.length === 0 ? <p className="text-sm text-muted">Nothing pending.</p> : (

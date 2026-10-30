@@ -99,7 +99,7 @@ export function api<S extends z.ZodType | undefined = undefined>(
         body = parsed.data;
       }
       const result = await handler({ req, user: user ?? { id: "", email: "" }, params, body: body as never });
-      if (result instanceof NextResponse) return result;
+      if (result instanceof Response) return result as NextResponse;
       return NextResponse.json(result ?? { ok: true });
     } catch (e) {
       return toErrorResponse(e);

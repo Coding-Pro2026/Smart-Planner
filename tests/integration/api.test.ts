@@ -15,6 +15,8 @@ import * as collabs from "@/app/api/events/[eventId]/collaborators/route";
 import * as chat from "@/app/api/events/[eventId]/chat/route";
 import * as proposals from "@/app/api/events/[eventId]/proposals/route";
 import * as proposal from "@/app/api/events/[eventId]/proposals/[proposalId]/route";
+import * as stream from "@/app/api/events/[eventId]/stream/route";
+import * as toBudget from "@/app/api/events/[eventId]/vendors/[vendorId]/to-budget/route";
 import * as vault from "@/app/api/llm/vault/route";
 import * as register from "@/app/api/auth/register/route";
 import * as loginRoute from "@/app/api/auth/login/route";
@@ -300,5 +302,48 @@ describe("planning chat: propose -> accept", () => {
     const r = await call(chat.POST, { as: alice, params: P(), headers: hdr, body: { message: "hello" } });
     expect(r.status).toBe(401);
     expect(r.text).not.toContain("sk-session-key-000000");
+  });
+});
+
+describe("real-time stream & quote→budget", () => {
+  const readOnce = async (r: ReadableStreamDefaultReader<Uint8Array>, ms = 1500) => {
+    const got = await Promise.race([r.read(), new Promise<null>((res) => setTimeout(() => res(null), ms))]);
+    return got && !got.done ? new TextDecoder().decode(got.value) : null;
+  };
+  const open = async (as: string) => {
+    await login(as);
+    const { NextRequest } = await import("next/server");
+    const ctl = new AbortController();
+    const res = await stream.GET(new NextRequest("http://localhost:3000/api/x", { headers: { host: "localhost:3000" }, signal: ctl.signal }), { params: Promise.resolve({ eventId }) });
+    return { res, reader: res.body!.getReader(), ctl };
+  };
+
+  it("pushes change signals to collaborators; vendors only see timeline changes; strangers get 404", async () => {
+    const editor = await open(alice);
+    expect(editor.res.headers.get("content-type")).toBe("text/event-stream");
+    expect(await readOnce(editor.reader)).toContain("connected");
+    const vend = await open(carol);
+    await readOnce(vend.reader);
+    await call(budget.POST, { as: bob, params: P(), body: { name: "Live item", category: "Misc", unitCost: 10 } });
+    let seen = "";
+    for (let i = 0; i < 5 && !seen.includes("data: budget"); i++) seen += (await readOnce(editor.reader)) ?? "";
+    expect(seen).toContain("data: budget");
+    let vseen = "";
+    for (let i = 0; i < 3; i++) vseen += (await readOnce(vend.reader, 400)) ?? "";
+    expect(vseen).not.toContain("budget"); // vendor is not told about budget changes
+    await login(bob);
+    const { NextRequest } = await import("next/server");
+    const denied = await stream.GET(new NextRequest("http://localhost:3000/api/x", { headers: { host: "localhost:3000" } }), { params: Promise.resolve({ eventId: "nope" }) });
+    expect(denied.status).toBe(404);
+    editor.ctl.abort(); vend.ctl.abort();
+  });
+
+  it("adds a vendor quote to the budget once, scoped to the event", async () => {
+    const v = (await call(vendors.POST, { as: alice, params: P(), body: { name: "Bloom", serviceType: "Florist", quoteAmount: 2950.5 } })).json.vendor;
+    const r = await call(toBudget.POST, { as: alice, params: P({ vendorId: v.id }), body: {} });
+    expect(r.json.item).toMatchObject({ category: "Florist", estimatedCost: 2950.5, vendorId: v.id, status: "quoted" });
+    expect((await call(toBudget.POST, { as: alice, params: P({ vendorId: v.id }), body: {} })).status).toBe(409);
+    const other = (await db.event.findFirstOrThrow({ where: { ownerId: bob } })).id;
+    expect((await call(toBudget.POST, { as: bob, params: { eventId: other, vendorId: v.id }, body: {} })).status).toBe(404);
   });
 });

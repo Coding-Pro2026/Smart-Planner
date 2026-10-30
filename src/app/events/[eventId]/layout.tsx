@@ -6,6 +6,7 @@ import { BarChart3, CalendarRange, FileText, Home, MessageSquareText, Settings, 
 import { useEvent, useEvents, useMe } from "@/lib/client/hooks";
 import { ErrorNote, Spinner, cn } from "@/components/ui";
 import { ApiError } from "@/lib/client/api";
+import { useEventStream } from "@/lib/client/use-event-stream";
 
 const TABS = [
   { href: "", label: "Dashboard", icon: Home, need: "tasks" },
@@ -22,6 +23,7 @@ export default function EventLayout({ children }: { children: ReactNode }) {
   const path = usePathname();
   const router = useRouter();
   useMe();
+  useEventStream(eventId);
   const ev = useEvent(eventId);
   const all = useEvents();
   const role = ev.data?.event.role;

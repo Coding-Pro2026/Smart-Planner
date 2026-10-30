@@ -135,8 +135,32 @@ test.describe.serial("PlanGenie end-to-end", () => {
     await expect(dlg).toContainText("non refundable"); // regex backstop flagged the clause
   });
 
+  test("a photographed quote (image) is read by the vision path, and can be added to the budget", async () => {
+    await page.getByRole("button", { name: "Close" }).click(); // comparison modal from the previous test
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+    await page.locator('input[type="file"]').setInputFiles({ name: "photo.png", mimeType: "image/png", buffer: png });
+    await page.getByRole("button", { name: "Analyse quote" }).click();
+    await expect(page.getByText(/Parsed — all-in total/).last()).toBeVisible({ timeout: 30_000 });
+    await page.getByRole("button", { name: "Add to budget" }).last().click();
+    await expect(page.getByRole("button", { name: /Added/ })).toHaveCount(1);
+    await page.getByRole("link", { name: "Budget" }).click();
+    await expect(page.getByRole("row", { name: /Petal Pushers — Florist/ }).first()).toContainText("$3,200");
+  });
+
+  test("live sync: a change made in another tab appears without reloading", async () => {
+    await page.getByRole("link", { name: "Budget" }).click();
+    await expect(page.getByText("projected total")).toBeVisible();
+    const other = await page.context().newPage();
+    await other.goto(page.url());
+    const id = page.url().match(/events\/([^/]+)/)![1];
+    const ok = await other.evaluate(async (eventId) => (await fetch(`/api/events/${eventId}/budget`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Synced live item", category: "Misc", unitCost: 42 }) })).ok, id);
+    expect(ok).toBe(true);
+    await expect(page.getByRole("row", { name: /Synced live item/ })).toBeVisible({ timeout: 8000 });
+    await other.close();
+  });
+
   test("a non-PDF disguised as .pdf is rejected", async () => {
-    await page.reload();
+    await page.getByRole("link", { name: "Vendors" }).click();
     await page.locator('input[type="file"]').setInputFiles({ name: "evil.pdf", mimeType: "application/pdf", buffer: Buffer.from("<html><script>alert(1)</script></html>") });
     await page.getByRole("button", { name: "Analyse quote" }).click();
     await expect(page.locator('p[role="alert"]')).toContainText("not a PDF");
