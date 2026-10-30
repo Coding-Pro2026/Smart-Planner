@@ -1,0 +1,37 @@
+name: CI
+on:
+  push: { branches: [main] }
+  pull_request:
+permissions: { contents: read }
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_PASSWORD: postgres }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/plangenie_test
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/plangenie_test
+      AUTH_SECRET: ci-only-secret-ci-only-secret-ci-only-secret
+      ALLOW_PRIVATE_LLM_ENDPOINTS: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npx prisma db push --skip-generate
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: ENCRYPTION_MASTER_KEY=$(npm run -s gen:master-key) npm run build
+      - name: Security audit (static)
+        run: ENCRYPTION_MASTER_KEY=x node scripts/security-audit.mjs --skip-tests
+      - name: Trivy filesystem scan (deps, secrets, misconfig)
+        uses: aquasecurity/trivy-action@0.28.0
+        with: { scan-type: fs, scanners: "vuln,secret,misconfig", severity: "CRITICAL,HIGH", ignore-unfixed: true, exit-code: "1" }

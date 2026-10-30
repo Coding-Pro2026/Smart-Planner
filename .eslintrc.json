@@ -1,0 +1,11 @@
+{
+  "extends": ["next/core-web-vitals", "next/typescript", "plugin:security/recommended-legacy"],
+  "rules": {
+    "security/detect-object-injection": "off",
+    "security/detect-non-literal-fs-filename": "error",
+    "security/detect-eval-with-expression": "error",
+    "security/detect-unsafe-regex": "error",
+    "security/detect-child-process": "error",
+    "@typescript-eslint/no-explicit-any": "error"
+  }
+}

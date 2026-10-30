@@ -1,0 +1,237 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum EventType {
+  wedding
+  birthday
+  community
+}
+
+enum CollaboratorRole {
+  owner
+  editor
+  viewer
+  vendor
+}
+
+enum TaskStatus {
+  todo
+  in_progress
+  done
+  blocked
+}
+
+enum BudgetStatus {
+  planned
+  quoted
+  booked
+  paid
+}
+
+enum VendorStatus {
+  researching
+  quoted
+  booked
+  rejected
+}
+
+enum RsvpStatus {
+  invited
+  accepted
+  declined
+  maybe
+}
+
+enum ProposalStatus {
+  pending
+  accepted
+  rejected
+}
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  passwordHash  String?  @map("password_hash")
+  authProvider  String   @default("credentials") @map("auth_provider")
+  // Vault mode only. AES-256-GCM envelope: { v, dek: wrapped DEK, keys: { provider: ciphertext } }.
+  encryptedKeys Json?    @map("encrypted_keys")
+  // Non-secret model selection and endpoints for the vault (provider -> { baseUrl, fastModel, reasoningModel }).
+  llmSettings   Json?    @map("llm_settings")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  ownedEvents   Event[]        @relation("EventOwner")
+  collaborators Collaborator[]
+  proposals     Proposal[]
+
+  @@map("users")
+}
+
+model Event {
+  id          String    @id @default(cuid())
+  ownerId     String    @map("owner_id")
+  title       String
+  eventType   EventType @map("event_type")
+  date        DateTime  @db.Date
+  location    String?
+  guestCount  Int       @default(0) @map("guest_count")
+  targetBudget Decimal  @default(0) @db.Decimal(14, 2) @map("target_budget")
+  actualSpend Decimal   @default(0) @db.Decimal(14, 2) @map("actual_spend")
+  currency    String    @default("USD") @db.VarChar(3)
+  theme       Json?
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  owner         User           @relation("EventOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  collaborators Collaborator[]
+  budgetItems   BudgetItem[]
+  tasks         Task[]
+  vendors       Vendor[]
+  rsvps         GuestRsvp[]
+  auditLogs     AuditLog[]
+  proposals     Proposal[]
+  agentRuns     AgentRun[]
+
+  @@index([ownerId])
+  @@map("events")
+}
+
+model Collaborator {
+  id      String           @id @default(cuid())
+  eventId String           @map("event_id")
+  userId  String           @map("user_id")
+  role    CollaboratorRole
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, userId])
+  @@index([userId])
+  @@map("collaborators")
+}
+
+model BudgetItem {
+  id               String       @id @default(cuid())
+  eventId          String       @map("event_id")
+  category         String
+  name             String
+  unitCost         Decimal      @default(0) @db.Decimal(14, 2) @map("unit_cost")
+  quantity         Decimal      @default(1) @db.Decimal(12, 3)
+  taxPct           Decimal      @default(0) @db.Decimal(6, 3) @map("tax_pct")
+  contingencyPct   Decimal      @default(0) @db.Decimal(6, 3) @map("contingency_pct")
+  perGuest         Boolean      @default(false) @map("per_guest")
+  // Computed by the deterministic engine on every write; never supplied by an LLM.
+  estimatedCost    Decimal      @default(0) @db.Decimal(14, 2) @map("estimated_cost")
+  actualCost       Decimal?     @db.Decimal(14, 2) @map("actual_cost")
+  status           BudgetStatus @default(planned)
+  vendorId         String?      @map("vendor_id")
+  notes            String?
+
+  event  Event   @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  vendor Vendor? @relation(fields: [vendorId], references: [id], onDelete: SetNull)
+
+  @@index([eventId])
+  @@map("budget_items")
+}
+
+model Task {
+  id             String     @id @default(cuid())
+  eventId        String     @map("event_id")
+  title          String
+  category       String     @default("general")
+  startDate      DateTime   @db.Date @map("start_date")
+  dueDate        DateTime   @db.Date @map("due_date")
+  bufferDays     Int        @default(0) @map("buffer_days")
+  status         TaskStatus @default(todo)
+  assignedTo     String?    @map("assigned_to")
+  dependencies   String[]   @default([])
+  isCriticalPath Boolean    @default(false) @map("is_critical_path")
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId])
+  @@map("tasks")
+}
+
+model Vendor {
+  id          String       @id @default(cuid())
+  eventId     String       @map("event_id")
+  name        String
+  serviceType String       @map("service_type")
+  quoteAmount Decimal?     @db.Decimal(14, 2) @map("quote_amount")
+  status      VendorStatus @default(researching)
+  contractUrl String?      @map("contract_url")
+  parsedTerms Json?        @map("parsed_terms")
+
+  event       Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  budgetItems BudgetItem[]
+
+  @@index([eventId])
+  @@map("vendors")
+}
+
+model GuestRsvp {
+  id                  String     @id @default(cuid())
+  eventId             String     @map("event_id")
+  guestName           String     @map("guest_name")
+  contact             String?
+  status              RsvpStatus @default(invited)
+  dietaryRequirements String?    @map("dietary_requirements")
+  seatingTable        String?    @map("seating_table")
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId])
+  @@map("guest_rsvps")
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  eventId   String   @map("event_id")
+  actorId   String?  @map("actor_id")
+  action    String
+  timestamp DateTime @default(now())
+  metadata  Json?
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId, timestamp])
+  @@map("audit_logs")
+}
+
+// A batch of agent-suggested actions awaiting human accept / reject.
+model Proposal {
+  id        String         @id @default(cuid())
+  eventId   String         @map("event_id")
+  userId    String         @map("user_id")
+  summary   String
+  actions   Json
+  status    ProposalStatus @default(pending)
+  createdAt DateTime       @default(now()) @map("created_at")
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([eventId, status])
+  @@map("proposals")
+}
+
+// LangGraph-style checkpoints: the full graph state is persisted after every node.
+model AgentRun {
+  id          String   @id @default(cuid())
+  eventId     String   @map("event_id")
+  userId      String   @map("user_id")
+  input       String
+  checkpoints Json     @default("[]")
+  status      String   @default("running")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId])
+  @@map("agent_runs")
+}

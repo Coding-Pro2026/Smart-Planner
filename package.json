@@ -1,0 +1,50 @@
+{
+  "name": "plangenie",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "prisma generate && next build",
+    "start": "next start",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "db:push": "prisma db push",
+    "db:generate": "prisma generate",
+    "audit:security": "node scripts/security-audit.mjs",
+    "gen:master-key": "node -e \"console.log(require('crypto').randomBytes(32).toString('base64'))\""
+  },
+  "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@prisma/client": "^6.19.3",
+    "@tanstack/react-query": "^5.105.0",
+    "clsx": "^2.1.1",
+    "framer-motion": "^14.9.0",
+    "jose": "^6.2.14",
+    "lucide-react": "^1.65.0",
+    "next": "^15.5.28",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "tailwind-merge": "^3.7.0",
+    "undici": "^8.12.3",
+    "unpdf": "^1.9.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "autoprefixer": "^10.6.2",
+    "eslint": "^8.57.1",
+    "eslint-config-next": "^15.5.28",
+    "eslint-plugin-security": "^4.2.1",
+    "postcss": "^8.5.32",
+    "prisma": "^6.19.3",
+    "tailwindcss": "^3.4.19",
+    "typescript": "^6.0.3",
+    "vitest": "^5.0.5"
+  }
+}
