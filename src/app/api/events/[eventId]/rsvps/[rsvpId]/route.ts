@@ -7,7 +7,7 @@ export const PATCH = api({ body: rsvpPatch }, async ({ user, params, body }) => 
   await requireEvent(user.id, eventId, "write");
   const r = await db.guestRsvp.updateMany({ where: { id: params.rsvpId!, eventId }, data: body });
   if (r.count === 0) throw notFound();
-  return { rsvp: await db.guestRsvp.findUniqueOrThrow({ where: { id: params.rsvpId! } }) };
+  return { rsvp: await db.guestRsvp.findFirstOrThrow({ where: { id: params.rsvpId!, eventId } }) };
 });
 
 export const DELETE = api({}, async ({ user, params }) => {

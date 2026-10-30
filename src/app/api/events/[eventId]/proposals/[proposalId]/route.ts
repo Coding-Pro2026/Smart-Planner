@@ -15,7 +15,7 @@ export const POST = api({ body: decisionInput }, async ({ user, params, body }) 
       await audit(tx, eventId, user.id, "proposal.rejected", { proposalId: params.proposalId! });
       return { status: "rejected" };
     }
-    const p = await tx.proposal.findUniqueOrThrow({ where: { id: params.proposalId! } });
+    const p = await tx.proposal.findFirstOrThrow({ where: { id: params.proposalId!, eventId } });
     const result = await applyActions(tx, eventId, user.id, p.actions as unknown[]); // throws => whole transaction (incl. claim) rolls back
     return { status: "accepted", result };
   });

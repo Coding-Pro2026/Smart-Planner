@@ -86,7 +86,9 @@ export async function runPlanningGraph(init: Pick<GraphState, "input" | "context
   const gen = deps.generate ?? generateStructured;
   let state: GraphState = { history: [], delegations: [], agentOutputs: [], reply: "", actions: [], insights: {}, warnings: [], ...init };
   const save = async (node: string) => {
-    const { context: _c, image: _i, ...rest } = state;
+    const rest: Omit<GraphState, "context" | "image"> & { context?: unknown; image?: unknown } = { ...state };
+    delete rest.context; // checkpoints hold decisions, not the (large) context or any image bytes
+    delete rest.image;
     await deps.checkpoint?.({ node, at: new Date().toISOString(), state: rest });
   };
   const flags = sanitizeUntrusted(init.input).flags;

@@ -3,7 +3,8 @@ import { completeRaw } from "./providers";
 import { LlmError, type ImageInput, type LlmConfig, type ModelTier } from "./types";
 
 export function toJsonSchema(schema: z.ZodType): Record<string, unknown> {
-  const { $schema: _ignored, ...rest } = z.toJSONSchema(schema, { target: "draft-7" }) as Record<string, unknown>;
+  const rest = { ...(z.toJSONSchema(schema, { target: "draft-7" }) as Record<string, unknown>) };
+  delete rest.$schema;
   return rest;
 }
 

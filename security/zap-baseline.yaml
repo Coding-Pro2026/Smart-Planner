@@ -1,0 +1,30 @@
+# OWASP ZAP Automation Framework plan — baseline + authenticated API scan against a running instance.
+#   docker run --rm --network host -v "$PWD/security:/zap/wrk:rw" ghcr.io/zaproxy/zaproxy:stable \
+#     zap.sh -cmd -autorun /zap/wrk/zap-baseline.yaml
+# Point `target` at staging (never at production with real data).
+env:
+  contexts:
+    - name: plangenie
+      urls: ["http://localhost:3000"]
+      includePaths: ["http://localhost:3000/.*"]
+      excludePaths: ["http://localhost:3000/_next/.*"]
+  parameters:
+    failOnError: true
+    progressToStdout: true
+jobs:
+  - type: spider
+    parameters: { context: plangenie, maxDuration: 3 }
+  - type: openapi        # optional: import an OpenAPI spec if you generate one
+    parameters: { targetUrl: "http://localhost:3000" }
+    enabled: false
+  - type: passiveScan-wait
+    parameters: { maxDuration: 5 }
+  - type: activeScan
+    parameters: { context: plangenie, maxRuleDurationInMins: 2, maxScanDurationInMins: 10 }
+    policyDefinition:
+      defaultStrength: Medium
+      defaultThreshold: Medium
+  - type: report
+    parameters: { template: traditional-html, reportDir: /zap/wrk, reportFile: zap-report.html }
+  - type: alertFilter
+    alertFilters: []

@@ -8,7 +8,7 @@ export const PATCH = api({ body: vendorPatch }, async ({ user, params, body }) =
   await requireEvent(user.id, eventId, "write");
   const r = await db.vendor.updateMany({ where: { id: params.vendorId!, eventId }, data: body });
   if (r.count === 0) throw notFound();
-  return { vendor: serializeVendor(await db.vendor.findUniqueOrThrow({ where: { id: params.vendorId! } })) };
+  return { vendor: serializeVendor(await db.vendor.findFirstOrThrow({ where: { id: params.vendorId!, eventId } })) };
 });
 
 export const DELETE = api({}, async ({ user, params }) => {

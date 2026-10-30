@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { db } from "../db";
-import { compareQuotes } from "../engine/quotes";
 import { quoteTermsSchema } from "../documents/quote-schema";
 
 /** Tenant-scoped: only vendors belonging to `eventId` are ever loaded. */
@@ -14,6 +13,3 @@ export async function loadQuotes(eventId: string, vendorIds: string[]) {
   return out;
 }
 
-export async function compareVendorQuotes(eventId: string, vendorIds: string[]) {
-  return compareQuotes(await loadQuotes(eventId, vendorIds));
-}

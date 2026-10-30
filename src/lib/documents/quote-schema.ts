@@ -27,7 +27,7 @@ export type QuoteTerms = z.infer<typeof quoteTermsSchema>;
 
 /** Cheap regex backstop so a missed clause is still surfaced even if the model overlooks it. */
 const CLAUSE_PATTERNS: { category: (typeof RISK_CATEGORIES)[number]; severity: "low" | "medium" | "high"; re: RegExp; explanation: string }[] = [
-  { category: "auto_renewal", severity: "high", re: /auto(?:matic(?:ally)?)?[- ]?renew|renews?\s+automatically/i, explanation: "Contract renews automatically unless cancelled." },
+  { category: "auto_renewal", severity: "high", re: /auto[- ]?renew|automatically renew|renews? automatically/i, explanation: "Contract renews automatically unless cancelled." },
   { category: "non_refundable", severity: "high", re: /non[- ]?refundable|no refunds?|deposit.{0,40}forfeit/i, explanation: "Payments may be non-refundable." },
   { category: "overtime", severity: "medium", re: /overtime|additional hours?.{0,30}(?:rate|fee|charge)|per hour (?:after|beyond)/i, explanation: "Extra hours billed at additional cost." },
   { category: "price_escalation", severity: "medium", re: /price (?:increase|adjustment|escalation)|subject to change|market rate/i, explanation: "Price may change after signing." },

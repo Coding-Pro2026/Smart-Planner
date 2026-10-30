@@ -11,9 +11,11 @@
  */
 
 // Control chars (keep \n and \t), zero-width / bidi overrides used to hide instructions.
-// eslint-disable-next-line no-control-regex
+// eslint-disable-next-line no-control-regex, security/detect-bidi-characters
 const CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F​-‏‪-‮⁠-⁤﻿]/g;
 
+/* eslint-disable security/detect-unsafe-regex -- every quantifier below is bounded or non-nested and inputs are length-capped;
+   tests/unit/security.test.ts runs adversarial 24k-char inputs against all of them. */
 const INJECTION_PATTERNS: [string, RegExp][] = [
   ["ignore-previous", /ignore\s+(all\s+|any\s+)?(the\s+)?(previous|prior|above|earlier)\s+(instructions?|prompts?|rules?)/i],
   ["disregard", /disregard\s+(all\s+|any\s+)?(the\s+)?(previous|prior|above|system)/i],
@@ -24,6 +26,8 @@ const INJECTION_PATTERNS: [string, RegExp][] = [
   ["chat-markup", /<\|(im_start|im_end|system|assistant)\|>|\[\/?INST\]/i],
   ["url-fetch", /\b(fetch|visit|open|browse|curl|wget|download)\b.{0,30}https?:\/\//i],
 ];
+
+/* eslint-enable security/detect-unsafe-regex */
 
 export interface SanitizeResult {
   text: string;
@@ -38,6 +42,7 @@ export function detectInjection(text: string): string[] {
 export function sanitizeUntrusted(input: string, maxChars = 8000): SanitizeResult {
   let text = input.normalize("NFKC").replace(CONTROL, "");
   // Neutralise anything that could close or spoof our fences / role markup.
+  // eslint-disable-next-line security/detect-unsafe-regex -- bounded; see adversarial test
   text = text.replace(/<\s*\/?\s*(untrusted[_-]?\w*|system|assistant|tool|instructions?)\s*>/gi, "[tag removed]").replace(/<\|[^|>]*\|>/g, "[marker removed]");
   const flags = detectInjection(text);
   const truncated = text.length > maxChars;

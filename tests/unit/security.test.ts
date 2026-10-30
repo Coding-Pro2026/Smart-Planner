@@ -96,3 +96,22 @@ describe("image validation", () => {
     expect(() => validateImage({ mime: "image/png", base64: Buffer.from("<svg onload=alert(1)>").toString("base64") })).toThrow();
   });
 });
+
+describe("ReDoS resistance", () => {
+  const adversarial = [
+    "a".repeat(24_000),
+    "ignore ".repeat(3_000),
+    " ".repeat(24_000) + "x",
+    "<".repeat(8_000) + " ".repeat(8_000),
+    "api key ".repeat(3_000),
+    "send " + "x ".repeat(12_000),
+    "auto".repeat(6_000),
+  ];
+  it("sanitizer + injection detection stay fast on adversarial 24k-char inputs", () => {
+    for (const input of adversarial) {
+      const t = performance.now();
+      sanitizeUntrusted(input, 24_000);
+      expect(performance.now() - t).toBeLessThan(250);
+    }
+  });
+});
