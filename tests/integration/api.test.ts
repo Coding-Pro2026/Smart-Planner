@@ -346,4 +346,39 @@ describe("real-time stream & quote→budget", () => {
     const other = (await db.event.findFirstOrThrow({ where: { ownerId: bob } })).id;
     expect((await call(toBudget.POST, { as: bob, params: { eventId: other, vendorId: v.id }, body: {} })).status).toBe(404);
   });
+
+  it("concurrent clicks add the vendor exactly once; rejected vendors and blank categories are handled", async () => {
+    const v = (await call(vendors.POST, { as: alice, params: P(), body: { name: "Racer", serviceType: "DJ", quoteAmount: 500 } })).json.vendor;
+    const rs = await Promise.all([1, 2, 3].map(() => call(toBudget.POST, { as: alice, params: P({ vendorId: v.id }), body: {} })));
+    expect(rs.map((r) => r.status).sort()).toEqual([200, 409, 409]);
+    expect(await db.budgetItem.count({ where: { eventId, vendorId: v.id } })).toBe(1);
+    const rej = (await call(vendors.POST, { as: alice, params: P(), body: { name: "Nope", serviceType: "Cake", quoteAmount: 90, status: "rejected" } })).json.vendor;
+    expect((await call(toBudget.POST, { as: alice, params: P({ vendorId: rej.id }), body: {} })).status).toBe(422);
+  });
+
+  it("signals are published only for successful requests (after commit)", async () => {
+    const { bus } = await import("@/lib/realtime");
+    const seen: string[] = [];
+    const off = bus.subscribe(eventId, (t) => seen.push(t));
+    await call(budget.POST, { as: alice, params: P(), body: { name: "x", category: "y", unitCost: -1 } }); // 400, validation
+    await call(budget.POST, { as: alice, params: P(), body: { name: "ok", category: "y", unitCost: 1 } });
+    off();
+    expect(seen).toEqual(["budget"]); // exactly one, for the successful request only
+  });
+
+  it("disconnects an open stream when the collaborator is removed", async () => {
+    process.env.STREAM_RECHECK_MS = "60";
+    const dan = await mkUser("dan@test.dev");
+    await call(collabs.POST, { as: alice, params: P(), body: { email: "dan@test.dev", role: "viewer" } });
+    const s = await open(dan);
+    await readOnce(s.reader);
+    await db.collaborator.deleteMany({ where: { eventId, userId: dan } });
+    let ended = false;
+    for (let i = 0; i < 10 && !ended; i++) {
+      const got = await Promise.race([s.reader.read(), new Promise<null>((r) => setTimeout(() => r(null), 300))]);
+      ended = !!got && got.done;
+    }
+    delete process.env.STREAM_RECHECK_MS;
+    expect(ended).toBe(true);
+  });
 });

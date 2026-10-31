@@ -1,25 +1,52 @@
 import { api, requireEvent } from "@/lib/http";
+import { getEventRole } from "@/lib/authz";
 import { bus, type Topic } from "@/lib/realtime";
 
 export const dynamic = "force-dynamic";
 
-/** Server-Sent Events: emits `data: <topic>` whenever something in the event changes. */
+
+/**
+ * Server-Sent Events: emits `data: <topic>` whenever something in the event changes.
+ * Membership is re-verified every 30 s on the open connection: a removed collaborator is disconnected
+ * and a downgraded one (e.g. editor -> vendor) immediately starts receiving the filtered feed.
+ */
 export const GET = api({}, async ({ req, user, params }) => {
   const eventId = params.eventId!;
-  const role = await requireEvent(user.id, eventId, "read_tasks");
+  const recheckMs = Number(process.env.STREAM_RECHECK_MS) || 30_000;
+  let role = await requireEvent(user.id, eventId, "read_tasks");
   const enc = new TextEncoder();
+  let closed = false;
   let off = () => {};
-  let beat: ReturnType<typeof setInterval>;
-  const stream = new ReadableStream({
-    start(ctrl) {
-      const send = (s: string) => { try { ctrl.enqueue(enc.encode(s)); } catch { /* closed */ } };
+  let timer: ReturnType<typeof setInterval> | undefined;
+  let ctrl!: ReadableStreamDefaultController<Uint8Array>;
+
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    off();
+    if (timer) clearInterval(timer);
+    try { ctrl.close(); } catch { /* already closed */ }
+  };
+  const send = (s: string) => { if (!closed) { try { ctrl.enqueue(enc.encode(s)); } catch { close(); } } };
+
+  const stream = new ReadableStream<Uint8Array>({
+    start(c) {
+      ctrl = c;
       send("retry: 3000\n\n: connected\n\n");
-      // Vendors only learn about timeline changes (they can't read the other data anyway).
       off = bus.subscribe(eventId, (t: Topic) => { if (role !== "vendor" || t === "tasks") send(`data: ${t}\n\n`); });
-      beat = setInterval(() => send(": ping\n\n"), 25_000);
-      req.signal.addEventListener("abort", () => { off(); clearInterval(beat); try { ctrl.close(); } catch { /* already closed */ } });
+      timer = setInterval(async () => {
+        try {
+          const r = await getEventRole(user.id, eventId);
+          if (!r) return close();
+          role = r;
+          send(": ping\n\n");
+        } catch { /* transient DB error: keep the stream, retry next tick */ }
+      }, recheckMs);
+      timer.unref?.();
     },
-    cancel() { off(); clearInterval(beat); },
+    cancel: close,
   });
+  if (req.signal.aborted) close();
+  else req.signal.addEventListener("abort", close, { once: true });
   return new Response(stream, { headers: { "content-type": "text/event-stream", "cache-control": "no-store, no-transform", connection: "keep-alive", "x-accel-buffering": "no" } });
 });

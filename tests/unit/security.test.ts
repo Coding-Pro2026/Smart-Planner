@@ -115,3 +115,11 @@ describe("ReDoS resistance", () => {
     }
   });
 });
+
+describe("PDF detection", () => {
+  it("requires the %PDF- header at the start, not anywhere in the first KB", async () => {
+    const { extractPdfText } = await import("@/lib/documents/pdf");
+    const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from("tEXt %PDF- smuggled"), Buffer.alloc(40)]);
+    await expect(extractPdfText(new Uint8Array(png))).rejects.toThrow(/not a PDF/);
+  });
+});

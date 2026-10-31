@@ -142,7 +142,7 @@ test.describe.serial("PlanGenie end-to-end", () => {
     await page.getByRole("button", { name: "Analyse quote" }).click();
     await expect(page.getByText(/Parsed — all-in total/).last()).toBeVisible({ timeout: 30_000 });
     await page.getByRole("button", { name: "Add to budget" }).last().click();
-    await expect(page.getByRole("button", { name: /Added/ })).toHaveCount(1);
+    await expect(page.getByText("In budget ✓")).toHaveCount(1);
     await page.getByRole("link", { name: "Budget" }).click();
     await expect(page.getByRole("row", { name: /Petal Pushers — Florist/ }).first()).toContainText("$3,200");
   });

@@ -13,6 +13,7 @@ import { SsrfError } from "./net/ssrf";
 import { CryptoError } from "./crypto";
 import { log } from "./logger";
 import { rateLimit } from "./security/rate-limit";
+import { withSignals } from "./realtime";
 
 export class HttpError extends Error {
   constructor(public status: number, message: string) {
@@ -65,7 +66,7 @@ export function api<S extends z.ZodType | undefined = undefined>(
   opts: Opts<S>,
   handler: (c: Ctx<S extends z.ZodType ? z.infer<S> : undefined>) => Promise<unknown>,
 ) {
-  return async (req: NextRequest, routeCtx: { params: Promise<Record<string, string>> }): Promise<NextResponse> => {
+  return async (req: NextRequest, routeCtx: { params: Promise<Record<string, string>> }): Promise<Response> => {
     try {
       assertSameOrigin(req);
       const params = (await routeCtx.params) ?? {};
@@ -98,8 +99,8 @@ export function api<S extends z.ZodType | undefined = undefined>(
         }
         body = parsed.data;
       }
-      const result = await handler({ req, user: user ?? { id: "", email: "" }, params, body: body as never });
-      if (result instanceof Response) return result as NextResponse;
+      const result = await withSignals(() => handler({ req, user: user ?? { id: "", email: "" }, params, body: body as never }));
+      if (result instanceof Response) return result;
       return NextResponse.json(result ?? { ok: true });
     } catch (e) {
       return toErrorResponse(e);
