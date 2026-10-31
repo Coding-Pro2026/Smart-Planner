@@ -1,4 +1,9 @@
-import { User } from 'firebase/auth';
+/** Minimal user shape (Firebase Auth is not bundled; Google sign-in is optional). */
+export interface User {
+  email?: string | null;
+  displayName?: string | null;
+  uid?: string;
+}
 import {
   EventRecord,
   GoogleAttendeeResponseStatus,

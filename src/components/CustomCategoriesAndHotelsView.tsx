@@ -29,6 +29,7 @@ import {
   TaskRecord,
 } from '../types/domain';
 import { postJson } from '../lib/api';
+import { safeHttpUrl } from '../lib/url';
 import { EventVenueAndHotelsMap } from './EventVenueAndHotelsMap';
 
 interface CustomCategoriesAndHotelsViewProps {
@@ -997,7 +998,7 @@ export const CustomCategoriesAndHotelsView: React.FC<
                   + Lock In Cheap Group Block
                 </button>
                 <a
-                  href={deal.booking_url}
+                  href={safeHttpUrl(deal.booking_url) ?? '#'}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="w-full py-2 px-3 text-xs font-medium text-indigo-700 hover:underline inline-flex items-center justify-center gap-1"
@@ -1015,7 +1016,7 @@ export const CustomCategoriesAndHotelsView: React.FC<
             {groundingSources.map((src, i) => (
               <a
                 key={i}
-                href={src.uri}
+                href={safeHttpUrl(src.uri) ?? '#'}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-indigo-600 hover:underline inline-flex items-center gap-1"

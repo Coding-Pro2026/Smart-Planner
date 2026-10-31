@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { postJson } from '../lib/api';
+import { safeHttpUrl } from '../lib/url';
 import { buildIcs, downloadTextFile, safeFilename } from '../lib/exporters';
 import {
   AlertCircle,
@@ -20,7 +21,6 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import type { User } from 'firebase/auth';
 import {
   AuditLogRecord,
   CollaboratorRecord,
@@ -38,6 +38,7 @@ import {
   logout,
   sendGoogleCalendarRsvpInvites,
   syncGoogleCalendarRsvpStatuses,
+  type User,
 } from '../lib/googleCalendarRsvp';
 
 interface ThemeAndRsvpViewProps {
@@ -418,7 +419,7 @@ export const ThemeAndRsvpView: React.FC<ThemeAndRsvpViewProps> = ({
 
                 {event.google_calendar_html_link && (
                   <a
-                    href={event.google_calendar_html_link}
+                    href={safeHttpUrl(event.google_calendar_html_link) ?? '#'}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-semibold text-indigo-700 bg-indigo-50/80 hover:bg-indigo-100 rounded-2xl transition-colors"

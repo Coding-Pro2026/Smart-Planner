@@ -21,6 +21,7 @@ import { buildVendorChecklist } from '../lib/vendorChecklist';
 import { buildLocalAssistantReply } from '../lib/localAssistant';
 import { generateIdeas } from '../lib/ideas';
 import { generateMoodboard } from '../lib/moodboardGenerator';
+import { safeHttpUrl } from '../lib/url';
 
 export interface SecurityAuditCheckResult {
   id: string;
@@ -491,6 +492,15 @@ export function runAllVerificationSuites(): FullVerificationReport {
       if (e instanceof CyclicDependencyError) return 'Cyclic graph raises CyclicDependencyError, which the UI now catches and displays as a banner.';
     }
     throw new Error('Cycle not detected');
+  });
+
+  // 19. Untrusted URL handling
+  runCheck('chk_safe_urls', 'PROMPT_INJECTION_SSRF', 'URL Guard: Blocks javascript:/data: Links From LLM or OpenStreetMap Data', () => {
+    for (const bad of ['javascript:alert(1)', 'data:text/html,<script>', 'vbscript:x', 'httpjavascript:1', '//evil.com', '']) {
+      if (safeHttpUrl(bad)) throw new Error(`Accepted unsafe URL: ${bad}`);
+    }
+    if (!safeHttpUrl('https://www.google.com/travel/hotels?q=a')) throw new Error('Rejected a valid https URL');
+    return 'Only well-formed http(s) URLs reach <a href>; script/data/protocol-relative URLs are dropped.';
   });
 
   const passedChecks = checks.filter((c) => c.passed).length;

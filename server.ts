@@ -1,5 +1,4 @@
 import express, { Request, Response } from 'express';
-import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
@@ -31,6 +30,7 @@ import { generateIdeas, type IdeaCard, type IdeaSet } from './src/lib/ideas';
 import { parseQuoteText } from './src/lib/quoteParser';
 import { generateMoodboard } from './src/lib/moodboardGenerator';
 import { isValidIsoDate } from './src/lib/dates';
+import { safeHttpUrl } from './src/lib/url';
 
 dotenv.config();
 
@@ -144,20 +144,50 @@ async function startServer() {
   (app as any).post = (path: string, ...handlers: any[]) =>
     originalPost(path, ...handlers.map(wrapAsync));
 
-  // Baseline security headers
+  // Behind a reverse proxy / load balancer, set TRUST_PROXY=1 so req.ip (rate limiting) is the client IP.
+  if (process.env.TRUST_PROXY) {
+    app.set('trust proxy', /^\d+$/.test(process.env.TRUST_PROXY) ? Number(process.env.TRUST_PROXY) : process.env.TRUST_PROXY);
+  }
+
+  const isProd = process.env.NODE_ENV === 'production';
+
+  // Security headers. The CSP only allows the third-party origins the UI actually uses.
+  const csp = [
+    "default-src 'self'",
+    "script-src 'self' https://maps.googleapis.com",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' https://fonts.gstatic.com data:",
+    "img-src 'self' data: blob: https:",
+    "media-src 'self' https://assets.mixkit.co",
+    "connect-src 'self' https://maps.googleapis.com",
+    "frame-src https://www.google.com",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'self'",
+  ].join('; ');
   app.use((_req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'SAMEORIGIN');
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+    if (isProd) {
+      // CSP is enforced in production only: the Vite dev server injects inline scripts for HMR.
+      res.setHeader('Content-Security-Policy', csp);
+      res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
+    }
     next();
   });
 
-  app.use(express.json({ limit: '15mb' }));
+  // Small JSON bodies everywhere; only the moodboard endpoint accepts an image (<= 5 MB file ≈ 7 MB base64).
+  app.use('/api/agents/analyze-moodboard', express.json({ limit: '8mb' }));
+  app.use(express.json({ limit: '256kb' }));
 
   // Tiny in-memory rate limiter for the AI endpoints (per IP, per minute).
   const hits = new Map<string, { count: number; resetAt: number }>();
   const RATE_LIMIT = Number(process.env.RATE_LIMIT_PER_MIN) || 90;
-  app.use('/api/agents', (req, res, next) => {
+  app.use('/api', (req, res, next) => {
     const now = Date.now();
     const ip = req.ip || req.socket.remoteAddress || 'unknown';
     const entry = hits.get(ip);
@@ -177,10 +207,15 @@ async function startServer() {
     for (const [k, v] of hits) if (v.resetAt < now) hits.delete(k);
   }, 60_000).unref();
 
-  // Row-Level Security (RLS) Tenant Context Helper
+  // Tenant context. There is no authentication layer, so a client-supplied tenant header must NOT be
+  // trusted by default (it would let any caller read/write another tenant's vault entry). It is only
+  // honoured when an upstream gateway that authenticates users sets it and TRUST_TENANT_HEADER=true.
+  const TRUST_TENANT_HEADER = process.env.TRUST_TENANT_HEADER === 'true';
   const getTenantId = (req: Request): string => {
     const headerTenant = req.headers['x-tenant-user-id'];
-    return typeof headerTenant === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(headerTenant.trim())
+    return TRUST_TENANT_HEADER &&
+      typeof headerTenant === 'string' &&
+      /^[A-Za-z0-9_-]{1,64}$/.test(headerTenant.trim())
       ? headerTenant.trim()
       : 'usr_primary_01';
   };
@@ -218,7 +253,7 @@ async function startServer() {
       tenantId,
       cipherSuite: 'AES-256-GCM (12B IV, 16B AuthTag, HKDF-SHA256)',
       hasEncryptedEnvelope: Boolean(envelope),
-      envelopePreview: envelope ? `${envelope.slice(0, 28)}...` : null,
+      envelopePreview: envelope ? 'aes-256-gcm:v1:••••••••' : null,
       serverGeminiConfigured: isConfiguredGeminiKey(process.env.GEMINI_API_KEY),
       routingConfig,
     });
@@ -229,6 +264,15 @@ async function startServer() {
     try {
       const tenantId = getTenantId(req);
       const { fastTaskProfile, reasoningVisionProfile, encryptionMode } = req.body ?? {};
+      const FAST = ['gemini-3.8-flash', 'gemini-3.1-flash-lite'];
+      const MODES = ['session_memory', 'aes_256_gcm_vault'];
+      if (
+        (fastTaskProfile !== undefined && !FAST.includes(fastTaskProfile)) ||
+        (reasoningVisionProfile !== undefined && reasoningVisionProfile !== 'gemini-3.8-flash') ||
+        (encryptionMode !== undefined && !MODES.includes(encryptionMode))
+      ) {
+        return res.status(400).json({ error: 'Unsupported routing profile.' });
+      }
       const payload = JSON.stringify({
         fastTaskProfile: fastTaskProfile || 'gemini-3.8-flash',
         reasoningVisionProfile: reasoningVisionProfile || 'gemini-3.8-flash',
@@ -241,7 +285,7 @@ async function startServer() {
       res.json({
         ok: true,
         tenantId,
-        envelopePreview: `${encrypted.slice(0, 28)}...`,
+        envelopePreview: 'aes-256-gcm:v1:••••••••',
         routingConfig: JSON.parse(payload),
       });
     } catch (err) {
@@ -1401,10 +1445,7 @@ Return ONLY a valid JSON array of 4 hotels sorted from cheapest nightly price to
                     amenities: Array.isArray(d.amenities)
                       ? d.amenities.slice(0, 4).map(String)
                       : ['Group Block Discount', 'Free Wi-Fi', 'Breakfast Included'],
-                    booking_url:
-                      typeof d.booking_url === 'string' && d.booking_url.startsWith('http')
-                        ? d.booking_url
-                        : firstGroundingUrl,
+                    booking_url: safeHttpUrl(d.booking_url) ?? safeHttpUrl(firstGroundingUrl) ?? `https://www.google.com/travel/hotels?q=${encodeURIComponent(`hotels near ${cityQuery}`)}`,
                     source_label: 'Live Google Search Grounding + Google Maps',
                     lat: matchedOsm?.lat,
                     lng: matchedOsm?.lng,
@@ -1464,7 +1505,7 @@ Return ONLY a valid JSON array of 4 hotels sorted from cheapest nightly price to
                   : 'Mid-Range Value',
               amenities: ['Group Rate Eligible', 'Free Cancellation', 'Breakfast & Parking'],
               booking_url:
-                h.website ||
+                safeHttpUrl(h.website) ||
                 `https://www.google.com/travel/hotels?q=${encodeURIComponent(`${h.name} ${cityQuery}`)}`,
               source_label: 'OpenStreetMap Live POI + Google Maps Pin',
               lat: h.lat,
@@ -1701,13 +1742,15 @@ Give 9 distinct, specific, personalised ideas (themes, activities, food & drink,
   });
 
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.resolve(__dirname, 'dist');
+    // Works both from source (./dist next to server.ts) and from the bundled dist/server.mjs
+    const distPath = path.basename(__dirname) === 'dist' ? __dirname : path.resolve(__dirname, 'dist');
     app.use(express.static(distPath, { maxAge: '1h', index: false }));
     app.get('*', (_req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
@@ -1737,6 +1780,23 @@ Give 9 distinct, specific, personalised ideas (themes, activities, food & drink,
         : 'AI mode: built-in deterministic engine (set GEMINI_API_KEY to enable Gemini)'
     );
   });
+  if (isProd && !process.env.ENCRYPTION_MASTER_KEY) {
+    console.warn(
+      '[config] ENCRYPTION_MASTER_KEY is not set — using a random per-process key (vault data will not survive restarts). Set a 32+ char secret.'
+    );
+  }
+  if (isProd && process.env.ENCRYPTION_MASTER_KEY && process.env.ENCRYPTION_MASTER_KEY.length < 32) {
+    console.error('[config] ENCRYPTION_MASTER_KEY must be at least 32 characters.');
+    process.exit(1);
+  }
+  const shutdown = (signal: string) => {
+    console.log(`${signal} received — shutting down gracefully`);
+    server.close(() => process.exit(0));
+    setTimeout(() => process.exit(1), 10_000).unref();
+  };
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  server.keepAliveTimeout = 65_000;
   server.on('error', (err: NodeJS.ErrnoException) => {
     console.error(err.code === 'EADDRINUSE' ? `Port ${PORT} is already in use.` : err);
     process.exit(1);

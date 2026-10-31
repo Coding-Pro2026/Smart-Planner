@@ -43,7 +43,7 @@ cp .env.example .env   # then set GEMINI_API_KEY to enable Gemini
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 18 verification checks (math, DAG, crypto, parsers, exports…)
+npm test            # 19 verification checks (math, DAG, crypto, parsers, exports…)
 npm run build       # production bundle
 npm run verify      # all of the above
 ```
@@ -54,3 +54,27 @@ npm run verify      # all of the above
 validation) then falls back to the pure modules in `src/lib/` that are shared by server and browser
 (`intakeParser`, `quoteParser`, `localAssistant`, `ideas`, `moodboardGenerator`, `insights`, `exporters`).
 Money and dates are never computed by the LLM — the model only *proposes* structured actions.
+
+## Deployment
+
+```bash
+npm run build && npm start            # builds client + dist/server.mjs, serves on $PORT (default 3000)
+# or
+docker build -t plangenie . && docker run -p 3000:3000 --env-file .env plangenie
+```
+
+Checklist: set `GEMINI_API_KEY` (optional) and `ENCRYPTION_MASTER_KEY` as platform secrets (never in the repo),
+terminate TLS at your proxy/platform and set `TRUST_PROXY=1`, point health checks at `GET /api/health`.
+The app is stateless server-side (plans live in the user's browser), so it scales horizontally; note the rate limiter
+is per-instance.
+
+## Security notes
+
+- No secrets in source; `.env*` is git-ignored; no key material is hard-coded (random per-process key if none configured).
+- Strict CSP + HSTS in production, nosniff, frame and permissions policies; `X-Powered-By` removed.
+- Request bodies capped (256 KB; 8 MB only for the moodboard image); per-IP rate limit on `/api`.
+- All LLM output is schema-validated and clamped; third-party URLs are restricted to `http(s)`; the UI never uses `innerHTML`.
+- Prompt input is sanitised against injection; the LLM only *proposes* actions that the user must accept.
+- Client-supplied tenant headers are ignored unless `TRUST_TENANT_HEADER=true` behind an authenticating gateway.
+- Known limitation: there is no user authentication — plans are stored per-browser. Add auth before storing shared/multi-user data server-side.
+- CI runs `bun audit` (currently 0 vulnerabilities), typecheck, tests and build.

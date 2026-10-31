@@ -11,11 +11,15 @@ const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH_BYTES = 12;
 const AUTH_TAG_LENGTH_BYTES = 16;
 
+/**
+ * No key material is ever hard-coded. When ENCRYPTION_MASTER_KEY is not set, a random
+ * per-process key is used, so envelopes are unreadable after a restart (the vault is
+ * in-memory, so nothing is lost). Set ENCRYPTION_MASTER_KEY (>= 32 chars) in production.
+ */
+const EPHEMERAL_MASTER_KEY = crypto.randomBytes(32).toString('hex');
+
 function getMasterKeyBuffer(customMasterKey?: string): Buffer {
-  const rawSecret =
-    customMasterKey ||
-    process.env.ENCRYPTION_MASTER_KEY ||
-    'plangenie-enterprise-default-master-key-2026-aes256gcm';
+  const rawSecret = customMasterKey || process.env.ENCRYPTION_MASTER_KEY || EPHEMERAL_MASTER_KEY;
   return crypto.createHash('sha256').update(rawSecret, 'utf8').digest();
 }
 

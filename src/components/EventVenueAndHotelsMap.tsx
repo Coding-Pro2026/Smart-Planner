@@ -23,6 +23,7 @@ import {
   Star,
 } from 'lucide-react';
 import { EventRecord, LiveNearbyHotelDeal } from '../types/domain';
+import { safeHttpUrl } from '../lib/url';
 
 interface EventVenueAndHotelsMapProps {
   event: EventRecord;
@@ -138,7 +139,7 @@ const HotelAdvancedMarkerWithInfo: React.FC<{
               </button>
               {place.websiteURI && (
                 <a
-                  href={place.websiteURI}
+                  href={safeHttpUrl(place.websiteURI) ?? '#'}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-[11px] font-semibold text-[#8C6226] hover:underline"
