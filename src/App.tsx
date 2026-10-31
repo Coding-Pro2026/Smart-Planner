@@ -75,10 +75,10 @@ import { SecurityAuditModal } from './components/SecurityAuditModal';
 import { EntryModeAndAiIntakeView } from './components/EntryModeAndAiIntakeView';
 import { ProductLandingPageView } from './components/ProductLandingPageView';
 import { EventVenueAndHotelsMap } from './components/EventVenueAndHotelsMap';
+import { OverviewDashboard } from './components/overview/OverviewDashboard';
 import { GoogleCalendarSyncResult } from './lib/googleCalendarRsvp';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToastStack, ToastMessage } from './components/ToastStack';
-import { ReadinessCard } from './components/ReadinessCard';
 import { ExportMenu } from './components/ExportMenu';
 import { AiSettingsModal } from './components/AiSettingsModal';
 import { GettingStartedCard } from './components/GettingStartedCard';
@@ -1842,10 +1842,30 @@ export default function App() {
             exit={{ opacity: 0, y: -10 }}
             transition={{ duration: 0.32, ease: [0.2, 0.7, 0.2, 1] }}
           >
-          {/* VIEW 1: CLEAN BENTO BOX DASHBOARD GRID */}
+          {/* VIEW 1: OVERVIEW DASHBOARD */}
           {activeTab === 'overview' && (
-            <div className="pg-stagger grid grid-cols-1 md:grid-cols-12 gap-6 items-stretch">
-              <div className="md:col-span-12">
+            <OverviewDashboard
+              event={currentEvent}
+              today={today}
+              daysToEvent={daysToEventRaw}
+              readiness={readiness}
+              budget={budgetResult}
+              tasks={cpmResult.tasks}
+              scheduleError={cpmError}
+              onRetrySchedule={() => navigateTab('timeline')}
+              rsvps={eventRsvps}
+              confirmedGuests={confirmedRsvpGuests}
+              vendors={eventVendors}
+              hotelBlocks={eventHotelBlocks}
+              customModules={eventCustomModules}
+              palette={{ title: eventMoodboard.title, swatches: eventMoodboard.color_Swatches }}
+              onNavigate={(tab) => navigateTab(tab)}
+              onToggleTask={handleToggleTaskStatus}
+              onOpenCustomModule={(id) => {
+                setFocusedCustomModuleId(id);
+                setActiveTab('custom_hotels');
+              }}
+              gettingStarted={
                 <GettingStartedCard
                   steps={[
                     {
@@ -1882,352 +1902,8 @@ export default function App() {
                     },
                   ]}
                 />
-              </div>
-              <div className="md:col-span-12">
-                <ReadinessCard
-                  report={readiness}
-                  daysToEvent={daysToEventRaw}
-                  onNavigate={(tab) => navigateTab(tab)}
-                />
-              </div>
-              {/* BENTO CELL 1 (Span 7): Event-Specific Custom Tabs & Regional Protocol Spotlight */}
-              <div className="md:col-span-7 bg-white border border-stone-200/80 rounded-3xl p-7 sm:p-8 flex flex-col justify-between gap-6 shadow-sm hover:shadow-lg transition-all duration-200 relative overflow-hidden">
-                <div className="h-1.5 w-full bg-gradient-to-r from-[#B88B4A] via-[#C86D51] to-[#4A6B53] absolute top-0 left-0" />
-                <div className="space-y-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <span className="text-xs font-bold text-[#8C6226]">
-                        Improvised Event-Specific Tabs ({currentEvent.event_type.toUpperCase()})
-                      </span>
-                      <h2 className="text-lg font-bold text-stone-900 mt-1">
-                        {eventCustomModules[0]?.category_title ||
-                          'Speaking Order & Custom Event Schedule'}
-                      </h2>
-                      <p className="text-xs text-stone-500 mt-0.5">
-                        Tailored specifically for{' '}
-                        <strong className="text-stone-800">{currentEvent.title}</strong> in{' '}
-                        <strong className="text-stone-800">{currentEvent.location}</strong>.
-                      </p>
-                    </div>
-                    <span className="font-mono text-xs font-bold text-[#4A6B53] shrink-0 tabular-nums">
-                      {eventCustomModules.length} custom tabs
-                    </span>
-                  </div>
-
-                  {/* Clickable Custom Module Pills */}
-                  <div className="flex flex-wrap gap-2">
-                    {eventCustomModules.map((mod) => (
-                      <button
-                        key={mod.id}
-                        type="button"
-                        onClick={() => {
-                          setFocusedCustomModuleId(mod.id);
-                          setActiveTab('custom_hotels');
-                        }}
-                        className="px-3 py-1.5 text-xs font-semibold text-[#4A6B53] bg-[#EDF3EE] hover:bg-[#DFECE1] rounded-xl transition-colors text-left"
-                      >
-                        {mod.category_title} ({mod.items.length}) →
-                      </button>
-                    ))}
-                  </div>
-
-                  <div className="divide-y divide-stone-100 border-t border-b border-stone-100">
-                    {(eventCustomModules[0]?.items ?? []).slice(0, 4).map((item, idx) => (
-                      <div
-                        key={item.id}
-                        className="py-2.5 flex items-center justify-between gap-3 text-xs"
-                      >
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <span className="font-mono text-[11px] font-bold text-[#8C6226] shrink-0 tabular-nums">
-                            #{idx + 1}
-                          </span>
-                          <span className="font-medium text-stone-800 truncate">
-                            {item.title}
-                          </span>
-                        </div>
-                        <span className="font-mono text-[11px] text-stone-500 shrink-0">
-                          {item.role_or_day}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('custom_hotels')}
-                  className="w-full py-3 px-4 text-xs font-semibold text-white bg-gradient-to-r from-[#B88B4A] to-[#9E7336] hover:from-[#A5793B] hover:to-[#8B6229] rounded-2xl transition-all inline-flex items-center justify-center gap-1.5 shadow-xs"
-                >
-                  Open Custom Event Tabs &amp; Reorder Speaking Sequence{' '}
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
-
-              {/* BENTO CELL 2 (Span 5): Cheap Nearby Hotels & Group Room Blocks */}
-              <div className="md:col-span-5 bg-white border border-stone-200/80 rounded-3xl p-7 sm:p-8 flex flex-col justify-between gap-6 shadow-sm hover:shadow-lg transition-all duration-200 relative overflow-hidden">
-                <div className="h-1.5 w-full bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 absolute top-0 left-0" />
-                <div className="space-y-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <span className="text-xs font-bold text-emerald-700">
-                        Nearby Hotels &amp; Room Blocks
-                      </span>
-                      <h2 className="text-lg font-bold text-stone-900 mt-1">
-                        Nearby Hotels in {currentEvent.location.split('—')[0].trim()}
-                      </h2>
-                      <p className="text-xs text-stone-500 mt-0.5">
-                        Real nearby hotels (OpenStreetMap) &amp; group room blocks
-                      </p>
-                    </div>
-                    <span className="font-mono text-xs font-bold text-stone-900 tabular-nums">
-                      {eventHotelBlocks.reduce((s, b) => s + b.rooms_booked, 0)}/
-                      {eventHotelBlocks.reduce((s, b) => s + b.rooms_blocked, 0)} rms
-                    </span>
-                  </div>
-
-                  <div className="divide-y divide-stone-100 border-t border-b border-stone-100">
-                    {eventHotelBlocks.slice(0, 3).map((hb) => (
-                      <div
-                        key={hb.id}
-                        className="py-3 flex items-center justify-between gap-3 text-xs"
-                      >
-                        <div className="min-w-0">
-                          <div className="font-semibold text-stone-900 truncate">
-                            {hb.hotel_name}
-                          </div>
-                          <div className="text-stone-500 truncate">
-                            {hb.room_type} ({hb.nights} nights)
-                          </div>
-                        </div>
-                        <div className="text-right font-mono shrink-0 tabular-nums">
-                          <div className="font-bold text-stone-900">
-                            ${hb.nightly_rate}/nt
-                          </div>
-                          <div className="text-[11px] text-emerald-700">
-                            {hb.rooms_booked}/{hb.rooms_blocked} rooms
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('custom_hotels')}
-                  className="w-full py-3 px-4 text-xs font-semibold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 rounded-2xl transition-all inline-flex items-center justify-center gap-1.5 shadow-xs"
-                >
-                  Find Nearby Hotels &amp; Manage Room Blocks{' '}
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
-
-              {/* BENTO CELL 3 (Span 4): Budget & Burn Rate */}
-              <div className="md:col-span-4 bg-white border border-stone-200/80 rounded-3xl p-7 sm:p-8 flex flex-col justify-between gap-6 shadow-sm hover:shadow-lg transition-all duration-200 relative overflow-hidden">
-                <div className="h-1.5 w-full bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 absolute top-0 left-0" />
-                <div className="space-y-5">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <span className="text-xs font-bold text-amber-700">
-                        Budget Overview
-                      </span>
-                      <h2 className="text-2xl font-bold text-stone-900 font-mono tabular-nums mt-1">
-                        <CountUp value={budgetResult.totalProjectedSpend} prefix="$" duration={1.2} />
-                      </h2>
-                      <p className="text-xs text-stone-500 mt-0.5">
-                        of ${currentEvent.target_budget.toLocaleString()} target budget
-                      </p>
-                    </div>
-                    <span
-                      className={`font-mono text-xs font-semibold tabular-nums ${
-                        budgetResult.statusLevel === 'CRITICAL_OVER_BUDGET'
-                          ? 'text-rose-600'
-                          : 'text-emerald-700'
-                      }`}
-                    >
-                      {budgetResult.burnRatePct}% used
-                    </span>
-                  </div>
-
-                  <div className="w-full h-2 bg-stone-100 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full rounded-full transition-all duration-300 ${
-                        budgetResult.statusLevel === 'CRITICAL_OVER_BUDGET'
-                          ? 'bg-gradient-to-r from-rose-500 to-orange-600'
-                          : 'bg-gradient-to-r from-[#B88B4A] via-[#689F77] to-[#4A6B53]'
-                      }`}
-                      style={{ width: `${Math.min(100, budgetResult.burnRatePct)}%` }}
-                    />
-                  </div>
-
-                  <div className="pt-4 border-t border-stone-100 space-y-1.5 text-xs">
-                    <div className="flex items-center justify-between text-stone-700 font-medium">
-                      <span>Linear Regression Projection</span>
-                      <span className="font-mono font-bold text-amber-800 tabular-nums">
-                        +{olsSummary.weightedYoyGrowthPct}% / yr
-                      </span>
-                    </div>
-                    <p className="text-stone-500 leading-relaxed">
-                      Early rate lock-in saves an estimated{' '}
-                      <strong className="font-mono text-emerald-700 tabular-nums">
-                        ${olsSummary.totalEarlyLockInSavings.toLocaleString('en-US', {
-                          maximumFractionDigits: 0,
-                        })}
-                      </strong>
-                      .
-                    </p>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2.5">
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('budget')}
-                    className="py-2.5 px-3 text-xs font-semibold text-stone-700 bg-stone-100 hover:bg-stone-200 rounded-2xl transition-colors"
-                  >
-                    Line Items
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('forecasting')}
-                    className="py-2.5 px-3 text-xs font-semibold text-indigo-700 bg-indigo-50/80 hover:bg-indigo-100 rounded-2xl transition-colors"
-                  >
-                    YoY Forecast →
-                  </button>
-                </div>
-              </div>
-
-              {/* BENTO CELL 4 (Span 4): Up Next on Your Schedule */}
-              <div className="md:col-span-4 bg-white border border-stone-200/80 rounded-3xl p-7 sm:p-8 flex flex-col justify-between gap-6 shadow-sm hover:shadow-lg transition-all duration-200 relative overflow-hidden">
-                <div className="h-1.5 w-full bg-gradient-to-r from-sky-500 via-blue-500 to-indigo-500 absolute top-0 left-0" />
-                <div className="space-y-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <span className="text-xs font-bold text-indigo-600">
-                        Schedule &amp; Milestones
-                      </span>
-                      <h2 className="text-lg font-bold text-stone-900 mt-1">
-                        Next Tasks
-                      </h2>
-                      <p className="text-xs text-stone-500 mt-0.5">
-                        Critical path &amp; checklist
-                      </p>
-                    </div>
-                    <span className="font-mono text-sm font-bold text-stone-900 tabular-nums">
-                      {completedTasksCount}/{cpmResult.tasks.length}
-                    </span>
-                  </div>
-
-                  <div className="divide-y divide-stone-100 border-t border-b border-stone-100">
-                    {cpmResult.tasks.slice(0, 4).map((task) => {
-                      const isDone = task.status === 'completed';
-                      return (
-                        <div
-                          key={task.id}
-                          className="py-2.5 flex items-center justify-between gap-3 text-xs"
-                        >
-                          <button
-                            type="button"
-                            onClick={() =>
-                              handleToggleTaskStatus(task.id, isDone ? 'todo' : 'completed')
-                            }
-                            className="flex items-center gap-2.5 text-left group min-w-0"
-                          >
-                            <span
-                              className={`w-4 h-4 rounded-md border flex items-center justify-center shrink-0 transition-colors ${
-                                isDone
-                                  ? 'bg-emerald-600 border-emerald-600 text-white'
-                                  : 'border-stone-300 group-hover:border-indigo-600'
-                              }`}
-                            >
-                              {isDone && <Check className="w-3 h-3" />}
-                            </span>
-                            <span
-                              className={`truncate font-medium ${
-                                isDone ? 'line-through text-stone-400' : 'text-stone-800'
-                              }`}
-                            >
-                              {task.title}
-                            </span>
-                          </button>
-                          <span className="font-mono text-[11px] text-stone-400 shrink-0 tabular-nums">
-                            {(task.due_date ?? '').slice(5)}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('timeline')}
-                  className="w-full py-3 px-4 text-xs font-semibold text-stone-800 bg-stone-100 hover:bg-stone-200 rounded-2xl transition-colors inline-flex items-center justify-center gap-1.5"
-                >
-                  Open Full Schedule <ArrowRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
-
-              {/* BENTO CELL 5 (Span 4): Guest RSVPs & Google Calendar Sync */}
-              <div className="md:col-span-4 bg-white border border-stone-200/80 rounded-3xl p-7 sm:p-8 flex flex-col justify-between gap-6 shadow-sm hover:shadow-lg transition-all duration-200 relative overflow-hidden">
-                <div className="h-1.5 w-full bg-gradient-to-r from-[#C86D51] via-[#D98A6C] to-[#B88B4A] absolute top-0 left-0" />
-                <div className="space-y-5">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <span className="text-xs font-bold text-rose-600">
-                        Guests &amp; Google Calendar RSVP
-                      </span>
-                      <h2 className="text-2xl font-bold text-stone-900 font-mono tabular-nums mt-1">
-                        <CountUp value={confirmedRsvpGuests} duration={1} />{' '}
-                        <span className="text-sm font-sans font-normal text-stone-500">
-                          / {currentEvent.guest_count} guests
-                        </span>
-                      </h2>
-                      <p className="text-xs text-stone-500 mt-0.5">
-                        Confirmed RSVPs ({eventRsvps.length} households)
-                      </p>
-                    </div>
-                    <Users className="w-4 h-4 text-rose-500 shrink-0 mt-1" />
-                  </div>
-
-                  <div className="pt-4 border-t border-stone-100 space-y-2.5">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-medium text-stone-700 truncate">
-                        {eventMoodboard.title}
-                      </span>
-                      <span className="text-[11px] text-stone-400 shrink-0">Palette</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {eventMoodboard.color_Swatches.map((swatch) => (
-                        <div key={swatch.hex} className="flex-1 space-y-1 text-center">
-                          <div
-                            className="h-6 w-full rounded-xl border border-stone-200/80 shadow-2xs"
-                            style={{ backgroundColor: swatch.hex }}
-                            title={`${swatch.name} (${swatch.hex})`}
-                          />
-                          <div className="font-mono text-[10px] text-stone-400">
-                            {swatch.hex}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('theme_rsvps')}
-                  className="w-full py-3 px-4 text-xs font-semibold text-stone-800 bg-stone-100 hover:bg-stone-200 rounded-2xl transition-colors inline-flex items-center justify-center gap-1.5"
-                >
-                  {currentEvent.google_calendar_event_id
-                    ? 'Sync Google Calendar RSVPs'
-                    : 'Send Google Calendar Email RSVPs'}{' '}
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
-
-              {/* BENTO CELL 6 (Span 12): Interactive Google Maps Platform Venue & Hotel Explorer */}
-              <div className="md:col-span-12">
+              }
+            >
                 <EventVenueAndHotelsMap
                   event={currentEvent}
                   liveHotelDeals={eventHotelBlocks.map((hb, idx) => ({
@@ -2252,17 +1928,12 @@ export default function App() {
                     handleUpdateEventContext({ location: nextLoc })
                   }
                 />
-              </div>
-
-              {/* BENTO CELL 7 (Span 12): Full-Width Linear Regression Budget Forecasting Widget */}
-              <div className="md:col-span-12">
                 <BudgetForecastingWidget
                   event={currentEvent}
                   budgetResult={budgetResult}
                   onApplyEscalationReserve={handleAddBudgetItem}
                 />
-              </div>
-            </div>
+            </OverviewDashboard>
           )}
 
           {/* VIEW 2: SCHEDULE & TIMELINE */}
