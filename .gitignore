@@ -8,3 +8,6 @@ coverage/
 !.env.example
 .gmp_cache/
 firebase-applet-config.json
+
+# Local Netlify folder
+.netlify

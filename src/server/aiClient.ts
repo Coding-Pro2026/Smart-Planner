@@ -119,7 +119,8 @@ async function call(cfg: AiConfig, params: GenerateParams, fetcher: Fetcher, tim
 
   let { res, data } = await send(true);
   // One quick retry for transient provider overload / rate-limit responses.
-  if ([429, 500, 502, 503, 504].includes(res.status) && !signal?.aborted) {
+  // (skipped on short serverless budgets where there is no time for a second attempt)
+  if ([429, 500, 502, 503, 504].includes(res.status) && !signal?.aborted && timeoutMs >= 20_000) {
     await new Promise((r) => setTimeout(r, 1200));
     ({ res, data } = await send(true));
   }
@@ -138,7 +139,7 @@ export function createAiClient(
   cfg: AiConfig,
   userSupplied: boolean,
   fetcher: Fetcher = safeRequest,
-  timeoutMs = 45_000,
+  timeoutMs = Math.max(2500, (Number(process.env.AI_TIMEOUT_MS) || 42_000) - 500),
   signal?: AbortSignal
 ): AiClient {
   return {
@@ -175,7 +176,7 @@ export async function listModels(cfg: AiConfig, fetcher: Fetcher = safeRequest):
 
 /** Cheap end-to-end check: one tiny generation. */
 export async function testConnection(cfg: AiConfig, fetcher: Fetcher = safeRequest): Promise<{ sample: string }> {
-  const client = createAiClient(cfg, true, fetcher, 25_000);
+  const client = createAiClient(cfg, true, fetcher, Math.min(25_000, Math.max(2500, (Number(process.env.AI_TIMEOUT_MS) || 42_000) - 500)));
   const out = await client.models.generateContent({
     contents: 'Reply with the single word: ready',
     config: { systemInstruction: 'You are a connectivity check. Reply with one word.' },

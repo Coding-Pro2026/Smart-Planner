@@ -12,7 +12,12 @@ export function getMapsKey(): string {
   } catch {
     /* ignore */
   }
-  const env = String(import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? '').trim();
+  let env = '';
+  try {
+    env = String(import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? '').trim();
+  } catch {
+    /* not running in a Vite build (e.g. bundled into the server) */
+  }
   return env.length >= 20 && !/YOUR_|PLACEHOLDER/i.test(env) ? env : '';
 }
 

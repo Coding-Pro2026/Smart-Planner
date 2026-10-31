@@ -287,8 +287,8 @@ export const ThemeAndRsvpView: React.FC<ThemeAndRsvpViewProps> = ({
       setMoodboardError('Please choose an image file (JPG, PNG or WebP).');
       return;
     }
-    if (file.size > 5_000_000) {
-      setMoodboardError('That image is over 5 MB — please choose a smaller one.');
+    if (file.size > 3_500_000) {
+      setMoodboardError('That image is over 3.5 MB — please choose a smaller one.');
       return;
     }
     setMoodboardError(null);
