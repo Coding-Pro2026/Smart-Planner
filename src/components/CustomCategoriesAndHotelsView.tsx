@@ -28,6 +28,7 @@ import {
   LiveNearbyHotelDeal,
   TaskRecord,
 } from '../types/domain';
+import { postJson } from '../lib/api';
 import { EventVenueAndHotelsMap } from './EventVenueAndHotelsMap';
 
 interface CustomCategoriesAndHotelsViewProps {
@@ -191,31 +192,31 @@ export const CustomCategoriesAndHotelsView: React.FC<
   ]);
 
   // Automatically fetch live online cheap hotels when event location changes
+  const hotelRequestId = React.useRef(0);
   const fetchLiveNearbyHotels = async (targetLoc?: string) => {
     const locToSearch = targetLoc || event.location;
+    const myRequest = ++hotelRequestId.current;
     setIsSearchingHotels(true);
-    try {
-      const res = await fetch('/api/agents/search-nearby-hotels', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          location: locToSearch,
-          maxNightlyBudget: Number(maxNightlyBudget) || 180,
-          eventType: event.event_type,
-        }),
-      });
-      const data = await res.json();
-      if (Array.isArray(data?.deals)) {
-        setLiveHotelDeals(data.deals);
-      }
-      if (Array.isArray(data?.groundingSources)) {
-        setGroundingSources(data.groundingSources);
-      }
-    } catch {
-      // Keep existing deals if offline
-    } finally {
-      setIsSearchingHotels(false);
+    const res = await postJson<{
+      deals?: LiveNearbyHotelDeal[];
+      groundingSources?: { title: string; uri: string }[];
+    }>(
+      '/api/agents/search-nearby-hotels',
+      {
+        location: locToSearch,
+        maxNightlyBudget: Number(maxNightlyBudget) || 180,
+        eventType: event.event_type,
+      },
+      { timeoutMs: 45_000 }
+    );
+    // Ignore stale responses (user switched event / location while this was in flight)
+    if (myRequest !== hotelRequestId.current) return;
+    if (res.ok && res.data) {
+      if (Array.isArray(res.data.deals)) setLiveHotelDeals(res.data.deals);
+      if (Array.isArray(res.data.groundingSources)) setGroundingSources(res.data.groundingSources);
     }
+    // On failure keep existing deals (offline-friendly)
+    setIsSearchingHotels(false);
   };
 
   useEffect(() => {
@@ -271,49 +272,52 @@ export const CustomCategoriesAndHotelsView: React.FC<
 
     setIsGenerating(true);
     setSyncedFeedback(null);
-    try {
-      onUpdateEventContext({
-        event_type: targetType,
-        location: targetLoc,
-        event_days: targetDays,
-        is_destination: targetDest,
-      });
+    onUpdateEventContext({
+      event_type: targetType,
+      location: targetLoc,
+      event_days: targetDays,
+      is_destination: targetDest,
+    });
 
-      const response = await fetch('/api/agents/generate-custom-modules', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          eventId: event.id,
-          eventType: targetType,
-          location: targetLoc,
-          eventDate: event.date,
-          eventDays: targetDays,
-          isDestination: targetDest,
-          customPrompt: targetPrompt,
-        }),
-      });
-      const data = await response.json();
-      if (data?.chainOfThoughtAnalysis) {
-        setCotAnalysis(data.chainOfThoughtAnalysis);
-      }
-      if (Array.isArray(data?.modules)) {
-        onReplaceCustomModulesAndHotels(
-          data.modules,
-          Array.isArray(data.hotelBlocks) ? data.hotelBlocks : hotelBlocks
-        );
-        if (onSelectFocusedModule) {
-          onSelectFocusedModule(null);
-        }
-        setSyncedFeedback(
-          `Chain-of-Thought Agent improvised ${data.modules.length} custom event sub-categories and ${
-            data.hotelBlocks?.length ?? 0
-          } hotel room blocks tailored for a ${targetDays}-day ${targetType} in ${targetLoc}.`
-        );
-      }
-      await fetchLiveNearbyHotels(targetLoc);
-    } finally {
-      setIsGenerating(false);
+    const res = await postJson<{
+      chainOfThoughtAnalysis?: typeof cotAnalysis;
+      modules?: CustomEventModule[];
+      hotelBlocks?: HotelRoomBlockRecord[];
+    }>(
+      '/api/agents/generate-custom-modules',
+      {
+        eventId: event.id,
+        eventType: targetType,
+        location: targetLoc,
+        eventDate: event.date,
+        eventDays: targetDays,
+        isDestination: targetDest,
+        customPrompt: targetPrompt,
+      },
+      { timeoutMs: 60_000 }
+    );
+    setIsGenerating(false);
+
+    if (!res.ok || !res.data || !Array.isArray(res.data.modules)) {
+      setSyncedFeedback(
+        `Couldn't generate custom categories right now (${res.ok ? 'empty response' : res.error}). Your existing tabs are unchanged.`
+      );
+      return;
     }
+    const data = res.data;
+    if (data.chainOfThoughtAnalysis) setCotAnalysis(data.chainOfThoughtAnalysis);
+    const modules = data.modules!.map((m) => ({ ...m, event_id: event.id }));
+    const hotels = Array.isArray(data.hotelBlocks)
+      ? data.hotelBlocks.map((h) => ({ ...h, event_id: event.id }))
+      : hotelBlocks;
+    onReplaceCustomModulesAndHotels(modules, hotels);
+    onSelectFocusedModule?.(null);
+    setSyncedFeedback(
+      `Improvised ${modules.length} custom event sub-categories and ${
+        Array.isArray(data.hotelBlocks) ? data.hotelBlocks.length : hotels.length
+      } hotel room blocks tailored for a ${targetDays}-day ${targetType} in ${targetLoc}.`
+    );
+    void fetchLiveNearbyHotels(targetLoc);
   };
 
   const applyPresetScenario = (preset: 'india_5d' | 'usa_2d' | 'funeral') => {
@@ -887,13 +891,13 @@ export const CustomCategoriesAndHotelsView: React.FC<
           <div className="space-y-1.5 max-w-2xl">
             <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700">
               <Globe className="w-4 h-4" />
-              <span>Live Online Hotel Search · Sorted by Lowest Nightly Price</span>
+              <span>Nearby Hotel Finder · Sorted by Lowest Nightly Price</span>
             </div>
             <h3 className="text-xl font-bold text-stone-900">
               Nearby Budget-Friendly Hotels Around {event.location.split('—')[0].trim()}
             </h3>
             <p className="text-xs text-stone-500 leading-relaxed">
-              Fetched online using live search grounding &amp; OpenStreetMap POI data so out-of-town guests can book affordable rooms near the venue. Click{' '}
+              Estimated group rates for affordable rooms near the venue (live search grounding is used when a Gemini key is configured). Always confirm the price on the booking site. Click{' '}
               <strong className="text-stone-800">Lock In Group Block</strong> on any hotel to add it to your event room blocks.
             </p>
           </div>

@@ -197,9 +197,9 @@ export const BudgetForecastingWidget: React.FC<BudgetForecastingWidgetProps> = (
           </p>
         </div>
 
-        <div className="flex flex-col items-end gap-2">
+        <div className="flex flex-col items-start sm:items-end gap-2 max-w-full">
           <span className="text-xs font-medium text-stone-500">Select Forecast Year</span>
-          <div className="flex items-center gap-1 p-1 bg-stone-100 rounded-2xl">
+          <div className="flex flex-wrap items-center gap-1 p-1 bg-stone-100 rounded-2xl max-w-full">
             {[2027, 2028, 2029, 2030].map((yr) => (
               <button
                 key={yr}

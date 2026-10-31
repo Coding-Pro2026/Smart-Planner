@@ -245,7 +245,7 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
   return (
     <div className="min-h-screen pg-aurora-bg text-stone-900 flex flex-col selection:bg-[#B88B4A] selection:text-white">
       {/* STRICT 3-ZONE TOP NAVIGATION BAR (Warm Cream, Honey Gold & Botanical Sage — Zero Purple) */}
-      <header className="sticky top-0 z-40 bg-[#FAF6EC]/95 dark:bg-stone-900/90 backdrop-blur-md border-b border-stone-200/80 px-6 lg:px-10 py-4 flex items-center justify-between gap-6">
+      <header className="sticky top-0 z-40 bg-[#FAF6EC]/95 dark:bg-stone-900/90 backdrop-blur-md border-b border-stone-200/80 px-4 sm:px-6 lg:px-10 py-3 sm:py-4 flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
         {/* Zone 1: Brand Wordmark */}
         <a
           href="#top"

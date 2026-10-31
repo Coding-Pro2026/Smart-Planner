@@ -36,15 +36,21 @@ export const SecurityAuditModal: React.FC<SecurityAuditModalProps> = ({
 
   const fetchAuditAndVault = async () => {
     setIsRunningAudit(true);
+    setSaveBanner(null);
     try {
       const [auditRes, vaultRes] = await Promise.all([
         fetch('/api/security/audit'),
         fetch('/api/vault/status'),
       ]);
+      if (!auditRes.ok || !vaultRes.ok) throw new Error('The verification service returned an error.');
       const auditData = await auditRes.json();
       const vaultData = await vaultRes.json();
       setReport(auditData);
       setVaultStatus(vaultData);
+    } catch (err) {
+      setSaveBanner(
+        `Couldn't run the verification suite: ${err instanceof Error ? err.message : 'network error'}. Please try again.`
+      );
     } finally {
       setIsRunningAudit(false);
     }
@@ -64,9 +70,12 @@ export const SecurityAuditModal: React.FC<SecurityAuditModalProps> = ({
     try {
       await onUpdateRoutingConfig(next);
       const vaultRes = await fetch('/api/vault/status');
+      if (!vaultRes.ok) throw new Error('vault status unavailable');
       const vaultData = await vaultRes.json();
       setVaultStatus(vaultData);
       setSaveBanner('Encrypted model routing profile sealed in AES-256-GCM server vault.');
+    } catch {
+      setSaveBanner('Could not save the routing profile. Please try again.');
     } finally {
       setIsSavingRouting(false);
     }
@@ -133,8 +142,8 @@ export const SecurityAuditModal: React.FC<SecurityAuditModalProps> = ({
                   disabled={isSavingRouting}
                   className="w-full px-3 py-2 bg-white border border-slate-300 rounded-md font-mono text-xs"
                 >
-                  <option value="gemini-3.8-flash">gemini-3.8-flash (Balanced Fast)</option>
-                  <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite (Ultra-Low Latency)</option>
+                  <option value="gemini-3.8-flash">Balanced Fast (Gemini 2.5 Flash)</option>
+                  <option value="gemini-3.1-flash-lite">Ultra-Low Latency (Gemini 2.5 Flash-Lite)</option>
                 </select>
               </div>
 
@@ -153,7 +162,7 @@ export const SecurityAuditModal: React.FC<SecurityAuditModalProps> = ({
                   disabled={isSavingRouting}
                   className="w-full px-3 py-2 bg-white border border-slate-300 rounded-md font-mono text-xs"
                 >
-                  <option value="gemini-3.8-flash">gemini-3.8-flash (Multimodal Structured)</option>
+                  <option value="gemini-3.8-flash">Multimodal Structured (Gemini 2.5 Flash)</option>
                 </select>
               </div>
 

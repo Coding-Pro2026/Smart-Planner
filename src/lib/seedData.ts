@@ -45,6 +45,7 @@ export const SEED_EVENTS: EventRecord[] = [
     guest_count: 140,
     target_budget: 68000,
     currency: 'USD',
+    event_days: 2,
   },
   {
     id: 'evt_birthday_02',

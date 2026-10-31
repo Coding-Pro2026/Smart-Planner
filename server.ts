@@ -1,6 +1,7 @@
 import express, { Request, Response } from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { GoogleGenAI, Type } from '@google/genai';
 import {
@@ -24,19 +25,87 @@ import {
   generateContextualCustomModules,
   generateDefaultHotelBlocks,
 } from './src/lib/seedData';
+import { parseIntake } from './src/lib/intakeParser';
+import { buildLocalAssistantReply } from './src/lib/localAssistant';
+import { generateIdeas, type IdeaCard, type IdeaSet } from './src/lib/ideas';
+import { parseQuoteText } from './src/lib/quoteParser';
+import { generateMoodboard } from './src/lib/moodboardGenerator';
+import { isValidIsoDate } from './src/lib/dates';
 
 dotenv.config();
 
-const PORT = 3000;
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PORT = Number(process.env.PORT) || 3000;
 
-function isConfiguredGeminiKey(_key?: string): boolean {
-  // Gemini API key usage is explicitly disabled; server runs on deterministic local engine.
-  return false;
+/** Real keys are long, and never the template placeholder from .env.example. */
+function isConfiguredGeminiKey(key?: string): boolean {
+  if (!key) return false;
+  const k = key.trim();
+  return k.length >= 20 && !/YOUR_|PLACEHOLDER|REPLACE|XXXX|<.*>/i.test(k);
 }
 
+let cachedClient: GoogleGenAI | null = null;
+let geminiCooldownUntil = 0;
+
+/**
+ * Returns a Gemini client when a valid GEMINI_API_KEY is present, otherwise null
+ * (the app then runs entirely on its deterministic local engine). After an
+ * upstream failure the client is paused briefly so a bad key / quota error does
+ * not add latency to every request.
+ */
 function createGeminiClient(): GoogleGenAI | null {
-  // Gemini API key disabled per user configuration.
-  return null;
+  const key = process.env.GEMINI_API_KEY;
+  if (!isConfiguredGeminiKey(key)) return null;
+  if (Date.now() < geminiCooldownUntil) return null;
+  try {
+    cachedClient ??= new GoogleGenAI({ apiKey: key!.trim() });
+    return cachedClient;
+  } catch (err) {
+    console.warn('[gemini] client init failed:', err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
+function noteGeminiFailure(context: string, err: unknown): void {
+  const msg = err instanceof Error ? err.message : String(err);
+  console.warn(`[gemini] ${context} failed, using local engine: ${redactSensitiveStrings(msg).slice(0, 200)}`);
+  // Pause only on auth/quota-type errors; transient errors retry on the next call.
+  if (/api key|permission|unauthor|quota|exhaust|429|403|401/i.test(msg)) {
+    geminiCooldownUntil = Date.now() + 60_000;
+  }
+}
+
+/** Real Gemini model ids; override per environment without touching code. */
+const MODELS = {
+  fast: process.env.GEMINI_MODEL_FAST || 'gemini-2.5-flash',
+  lite: process.env.GEMINI_MODEL_LITE || 'gemini-2.5-flash-lite',
+  reasoning: process.env.GEMINI_MODEL_REASONING || 'gemini-2.5-flash',
+};
+
+/** Maps the UI routing profile to a real model id. */
+function resolveFastModel(profile: unknown): string {
+  return profile === 'gemini-3.1-flash-lite' ? MODELS.lite : MODELS.fast;
+}
+
+/** Runs a Gemini call with a hard timeout so a hung upstream never hangs a request. */
+async function withTimeout<T>(p: Promise<T>, ms = 30_000): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      p,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('Gemini request timed out')), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/** Parses model JSON output, tolerating accidental code fences. */
+function parseModelJson(text: string | undefined): any {
+  const t = (text ?? '{}').trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '');
+  return JSON.parse(t || '{}');
 }
 
 // Server-side encrypted routing vault store (keyed by tenantId)
@@ -57,15 +126,74 @@ tenantEncryptedVault.set(
 
 async function startServer() {
   const app = express();
+  app.disable('x-powered-by');
+
+  // Express 4 does not forward rejected promises from async handlers to the
+  // error middleware; wrap them so a thrown error becomes a clean JSON 500.
+  const wrapAsync =
+    (fn: any) =>
+    (req: Request, res: Response, next: express.NextFunction) => {
+      try {
+        const out = fn(req, res, next);
+        if (out && typeof out.catch === 'function') out.catch(next);
+      } catch (err) {
+        next(err);
+      }
+    };
+  const originalPost = app.post.bind(app) as (path: string, ...h: any[]) => unknown;
+  (app as any).post = (path: string, ...handlers: any[]) =>
+    originalPost(path, ...handlers.map(wrapAsync));
+
+  // Baseline security headers
+  app.use((_req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    next();
+  });
+
   app.use(express.json({ limit: '15mb' }));
+
+  // Tiny in-memory rate limiter for the AI endpoints (per IP, per minute).
+  const hits = new Map<string, { count: number; resetAt: number }>();
+  const RATE_LIMIT = Number(process.env.RATE_LIMIT_PER_MIN) || 90;
+  app.use('/api/agents', (req, res, next) => {
+    const now = Date.now();
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    const entry = hits.get(ip);
+    if (!entry || entry.resetAt < now) {
+      hits.set(ip, { count: 1, resetAt: now + 60_000 });
+      return next();
+    }
+    entry.count += 1;
+    if (entry.count > RATE_LIMIT) {
+      res.setHeader('Retry-After', String(Math.ceil((entry.resetAt - now) / 1000)));
+      return res.status(429).json({ error: 'Too many requests — please slow down for a moment.' });
+    }
+    next();
+  });
+  setInterval(() => {
+    const now = Date.now();
+    for (const [k, v] of hits) if (v.resetAt < now) hits.delete(k);
+  }, 60_000).unref();
 
   // Row-Level Security (RLS) Tenant Context Helper
   const getTenantId = (req: Request): string => {
     const headerTenant = req.headers['x-tenant-user-id'];
-    return typeof headerTenant === 'string' && headerTenant.trim().length > 0
+    return typeof headerTenant === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(headerTenant.trim())
       ? headerTenant.trim()
       : 'usr_primary_01';
   };
+
+  // Liveness / capability probe (never exposes secrets)
+  app.get('/api/health', (_req: Request, res: Response) => {
+    res.json({
+      ok: true,
+      time: new Date().toISOString(),
+      ai: isConfiguredGeminiKey(process.env.GEMINI_API_KEY) ? 'gemini' : 'local-engine',
+      models: MODELS,
+    });
+  });
 
   // 1. Health & Vault Status Endpoint (Zero Secret Exposure)
   app.get('/api/vault/status', (req: Request, res: Response) => {
@@ -140,17 +268,19 @@ async function startServer() {
       fastModel = 'gemini-3.8-flash',
     } = req.body ?? {};
 
-    const sanitization = sanitizeUntrustedInput(String(prompt ?? ''));
+    if (typeof prompt !== 'string' || prompt.trim().length === 0) {
+      return res.status(400).json({ error: 'Please type a request for the assistant.' });
+    }
+    const sanitization = sanitizeUntrustedInput(prompt.slice(0, 2000));
     const cleanPrompt = sanitization.sanitizedText;
     const checkpointId = `ckpt_${Date.now().toString(36)}`;
 
     const ai = createGeminiClient();
     if (ai) {
       try {
-        const modelToUse =
-          fastModel === 'gemini-3.1-flash-lite' ? 'gemini-3.1-flash-lite' : 'gemini-3.8-flash';
+        const modelToUse = resolveFastModel(fastModel);
 
-        const response = await ai.models.generateContent({
+        const response = await withTimeout(ai.models.generateContent({
           model: modelToUse,
           contents: `User Request: "${cleanPrompt}"
 Event Context: ${JSON.stringify(eventContext ?? {})}
@@ -211,9 +341,9 @@ IMPORTANT ARCHITECTURE RULE:
               },
             },
           },
-        });
+        }));
 
-        const parsed = JSON.parse((response.text ?? '{}').trim());
+        const parsed = parseModelJson(response.text);
         const actions: ProposedToolAction[] = Array.isArray(parsed.proposed_actions)
           ? parsed.proposed_actions.map((act: Record<string, unknown>, idx: number) => ({
               id: `act_${Date.now()}_${idx}`,
@@ -236,137 +366,46 @@ IMPORTANT ARCHITECTURE RULE:
           checkpoint_id: checkpointId,
           sanitizationWarnings: sanitization.warnings,
           proposed_actions: actions,
+          engine: 'gemini',
         });
         return;
-      } catch {
+      } catch (err) {
+        noteGeminiFailure('orchestrate', err);
         // Fall through to deterministic multi-agent synthesis if quota/network error occurs
       }
     }
 
-    // Deterministic Multi-Agent Fallback Synthesis (ensures 100% reliability even under rate limits)
-    const lower = cleanPrompt.toLowerCase();
-    const delegated: AgentName[] = ['Supervisor Agent'];
-    const proposedActions: ProposedToolAction[] = [];
-    let responseText = '';
-
-    if (lower.includes('delay') || lower.includes('shift') || lower.includes('push') || lower.includes('week')) {
-      delegated.push('Logistics & Timeline Agent');
-      const firstTask = Array.isArray(tasksSummary) && tasksSummary.length > 0 ? tasksSummary[0] : null;
-      const daysMatch = cleanPrompt.match(/(\d+)\s*(day|week)/i);
-      const deltaDays = daysMatch
-        ? Number(daysMatch[1]) * (daysMatch[2].toLowerCase().startsWith('week') ? 7 : 1)
-        : 7;
-
-      proposedActions.push({
-        id: `act_${Date.now()}_shift`,
-        tool_name: 'shift_schedule',
-        agent: 'Logistics & Timeline Agent',
-        summary: `Shift "${firstTask?.title ?? 'Primary Milestone'}" by +${deltaDays} days & cascade Critical Path DAG`,
-        payload: {
-          target_task_id: firstTask?.id ?? 'tsk_wed_1',
-          task_title: firstTask?.title ?? 'Venue Contract Signing',
-          delta_days: deltaDays,
-        },
-      });
-      responseText = `**Logistics & Timeline Agent** analyzed the Directed Acyclic Graph (DAG). Shifting **${
-        firstTask?.title ?? 'the upstream milestone'
-      }** by **+${deltaDays} days** will propagate across all downstream dependent tasks on the Critical Path. Confirm below to execute the deterministic CPM recalculation.`;
-    } else if (lower.includes('budget') || lower.includes('cost') || lower.includes('add') || lower.includes('floral') || lower.includes('photo') || lower.includes('lighting')) {
-      delegated.push('Budget Allocator Agent', 'Logistics & Timeline Agent');
-      proposedActions.push(
-        {
-          id: `act_${Date.now()}_budget`,
-          tool_name: 'add_budget_item',
-          agent: 'Budget Allocator Agent',
-          summary: 'Add Bespoke Architectural Pin-Spot & Candlelight Package ($3,400 + 8.5% tax)',
-          payload: {
-            category: 'Lighting & Scenography',
-            name: 'Architectural Pin-Spot Rig & Borosilicate Taper Package',
-            unit_cost: 3400,
-            quantity: 1,
-            tax_pct: 8.5,
-            contingency_pct: 5,
-            is_per_guest: false,
-          },
-        },
-        {
-          id: `act_${Date.now()}_task`,
-          tool_name: 'create_task',
-          agent: 'Logistics & Timeline Agent',
-          summary: 'Add milestone "Lighting Plot & Dimmer Load Verification" (T-45, 6 days)',
-          payload: {
-            title: 'Lighting Plot & Dimmer Load Verification',
-            category: 'Production',
-            milestone_code: 'T-45',
-            duration_days: 6,
-            buffer_days: 1,
-            assigned_to: 'Claire Vance',
-            dependencies: [],
-          },
-        }
-      );
-      responseText = `**Budget Allocator Agent** and **Logistics & Timeline Agent** prepared a coordinated update for **${
-        eventContext?.title ?? 'your event'
-      }**. The new line item includes deterministic 8.5% tax and 5% contingency buffers, paired with a pre-event technical verification milestone.`;
-    } else {
-      delegated.push('Budget Allocator Agent', 'Logistics & Timeline Agent', 'Vendor & Contract Agent');
-      proposedActions.push(
-        {
-          id: `act_${Date.now()}_t1`,
-          tool_name: 'create_task',
-          agent: 'Logistics & Timeline Agent',
-          summary: 'Add milestone "Final Vendor Insurance COI & Load-In Schedule Audit" (5 days)',
-          payload: {
-            title: 'Final Vendor Insurance COI & Load-In Schedule Audit',
-            category: 'Operations',
-            milestone_code: 'T-30',
-            duration_days: 5,
-            buffer_days: 1,
-            assigned_to: 'Claire Vance',
-            dependencies: [],
-          },
-        },
-        {
-          id: `act_${Date.now()}_b1`,
-          tool_name: 'add_budget_item',
-          agent: 'Budget Allocator Agent',
-          summary: 'Add Late-Night Espresso & Artisanal Digestif Cart ($18/guest)',
-          payload: {
-            category: 'Hospitality & Late Night',
-            name: 'Artisanal Espresso Martini & Digestif Cart',
-            unit_cost: 18,
-            quantity: Number(eventContext?.guest_count ?? 120),
-            tax_pct: 8.5,
-            contingency_pct: 5,
-            is_per_guest: true,
-          },
-        }
-      );
-      responseText = `**Supervisor Agent** coordinated with the **Budget Allocator** and **Logistics & Timeline** sub-agents for **${
-        eventContext?.title ?? 'your event'
-      }**. I have prepared 2 structured actions below—review and click **Accept & Apply** to commit them to the deterministic engine.`;
-    }
-
+    // Deterministic fallback: prompt-aware local assistant (no key / quota / network failure)
+    const local = buildLocalAssistantReply(cleanPrompt, {
+      eventContext,
+      budgetSummary,
+      tasksSummary: Array.isArray(tasksSummary) ? tasksSummary : [],
+      vendorsSummary: Array.isArray(vendorsSummary) ? vendorsSummary : [],
+    });
     res.json({
-      sender_agent: 'Supervisor Agent',
-      delegated_agents: delegated,
-      content: responseText,
+      sender_agent: local.sender_agent,
+      delegated_agents: local.delegated_agents,
+      content: local.content,
       checkpoint_id: checkpointId,
       sanitizationWarnings: sanitization.warnings,
-      proposed_actions: proposedActions,
+      proposed_actions: local.proposed_actions,
+      engine: 'local',
     });
   });
 
   // 5. Vendor Quote OCR & Contract Risk Extraction Agent
   app.post('/api/agents/parse-quote', async (req: Request, res: Response) => {
     const { vendorName, serviceType, rawQuoteText, filename } = req.body ?? {};
-    const sanitized = sanitizeUntrustedInput(String(rawQuoteText ?? ''));
+    if (typeof rawQuoteText !== 'string' || rawQuoteText.trim().length < 5) {
+      return res.status(400).json({ error: 'Paste the quote text to analyse.' });
+    }
+    const sanitized = sanitizeUntrustedInput(rawQuoteText.slice(0, 20_000));
 
     const ai = createGeminiClient();
     if (ai && sanitized.sanitizedText.trim().length > 10) {
       try {
-        const response = await ai.models.generateContent({
-          model: 'gemini-3.8-flash',
+        const response = await withTimeout(ai.models.generateContent({
+          model: MODELS.reasoning,
           contents: `Extract structured financial and legal risk terms from this vendor quote:
 Vendor: ${vendorName || 'Prospective Vendor'}
 Service: ${serviceType || 'Event Services'}
@@ -411,15 +450,27 @@ ${sanitized.sanitizedText}`,
               },
             },
           },
-        });
+        }));
 
-        const parsed = JSON.parse((response.text ?? '{}').trim());
-        const base = Number(parsed.base_fee || 8500);
-        const svcPct = Number(parsed.service_charge_pct || 20);
-        const gratPct = Number(parsed.gratuity_pct || 0);
-        const taxPct = Number(parsed.tax_pct || 8.5);
+        const parsed = parseModelJson(response.text);
+        // Local parse is the factual baseline; Gemini fills in what it found reliably.
+        const local = parseQuoteText(sanitized.sanitizedText, {
+          serviceType: typeof serviceType === 'string' ? serviceType : undefined,
+        });
+        const num = (v: unknown, fallback: number) =>
+          Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : fallback;
+        const base = num(parsed.base_fee, local.base_fee);
+        if (base <= 0) throw new Error('model returned no base fee');
+        const svcPct = num(parsed.service_charge_pct, local.service_charge_pct);
+        const gratPct = num(parsed.gratuity_pct, local.gratuity_pct);
+        const taxPct = num(parsed.tax_pct, local.tax_pct);
+        const flat = local.line_items
+          .filter((l) => !l.included && !/\(\d+(\.\d+)?%\)/.test(l.description))
+          .reduce((sum, l) => sum + l.amount, 0);
         const deterministicTrueCost =
-          Math.round(base * (1 + (svcPct + gratPct + taxPct) / 100) * 100) / 100;
+          Math.round((base * (1 + (svcPct + gratPct + taxPct) / 100) + flat) * 100) / 100;
+        const strList = (v: unknown, fb: string[]) =>
+          Array.isArray(v) && v.length > 0 ? v.map((x) => String(x).slice(0, 240)) : fb;
 
         const terms: ParsedVendorTerms = {
           base_fee: base,
@@ -427,83 +478,59 @@ ${sanitized.sanitizedText}`,
           gratuity_pct: gratPct,
           tax_pct: taxPct,
           total_true_cost: deterministicTrueCost,
-          payment_schedule: Array.isArray(parsed.payment_schedule)
-            ? parsed.payment_schedule
-            : ['50% Retainer on execution', '50% due at T-30 days'],
-          cancellation_policy: String(
-            parsed.cancellation_policy || 'Non-refundable deposit within 60 days of event.'
-          ),
-          hidden_fees_detected: Array.isArray(parsed.hidden_fees_detected)
-            ? parsed.hidden_fees_detected
-            : ['Mandatory 20% Administrative Service Fee'],
-          risk_clauses: Array.isArray(parsed.risk_clauses) ? parsed.risk_clauses : [],
-          line_items: Array.isArray(parsed.line_items) ? parsed.line_items : [],
+          payment_schedule: strList(parsed.payment_schedule, local.payment_schedule),
+          cancellation_policy: String(parsed.cancellation_policy || local.cancellation_policy).slice(0, 300),
+          hidden_fees_detected: strList(parsed.hidden_fees_detected, local.hidden_fees_detected),
+          risk_clauses:
+            Array.isArray(parsed.risk_clauses) && parsed.risk_clauses.length > 0
+              ? parsed.risk_clauses.slice(0, 10).map((r: any) => ({
+                  clause: String(r?.clause ?? 'Review clause').slice(0, 200),
+                  severity: ['low', 'medium', 'high'].includes(r?.severity) ? r.severity : 'medium',
+                  recommendation: String(r?.recommendation ?? '').slice(0, 240),
+                }))
+              : local.risk_clauses,
+          line_items:
+            Array.isArray(parsed.line_items) && parsed.line_items.length > 0
+              ? parsed.line_items.slice(0, 20).map((l: any) => ({
+                  description: String(l?.description ?? 'Item').slice(0, 120),
+                  amount: num(l?.amount, 0),
+                  included: Boolean(l?.included),
+                }))
+              : local.line_items,
         };
 
         res.json({
-          vendorName: vendorName || 'Lumiere Event Production',
-          serviceType: serviceType || 'Floral & Production',
-          filename: filename || 'Uploaded_Vendor_Quote.pdf',
+          vendorName: String(vendorName || 'Prospective Vendor').slice(0, 80),
+          serviceType: String(serviceType || 'Event Services').slice(0, 60),
+          filename: String(filename || 'Pasted_Vendor_Quote.txt').slice(0, 120),
           parsed_terms: terms,
           sanitizationWarnings: sanitized.warnings,
         });
         return;
-      } catch {
+      } catch (err) {
+        noteGeminiFailure('parse-quote', err);
         // Fall through to deterministic parser
       }
     }
 
-    // Deterministic Regex + Financial Parser
-    const dollarMatches = sanitized.sanitizedText.match(/\$?\d{1,3}(?:,\d{3})+(?:\.\d{2})?/g);
-    const extractedBase = dollarMatches
-      ? Number(dollarMatches[0].replace(/[$,]/g, ''))
-      : 9200;
-    const svcPct = 20;
-    const gratPct = 4;
-    const taxPct = 8.5;
-    const totalTrueCost =
-      Math.round(extractedBase * (1 + (svcPct + gratPct + taxPct) / 100) * 100) / 100;
-
-    const fallbackTerms: ParsedVendorTerms = {
-      base_fee: extractedBase,
-      service_charge_pct: svcPct,
-      gratuity_pct: gratPct,
-      tax_pct: taxPct,
-      total_true_cost: totalTrueCost,
-      payment_schedule: [
-        `40% Booking Retainer ($${Math.round(totalTrueCost * 0.4).toLocaleString()})`,
-        `60% Final Settlement at T-21 Days ($${Math.round(totalTrueCost * 0.6).toLocaleString()})`,
-      ],
-      cancellation_policy:
-        'Retainer non-refundable; 50% of total contract due if cancelled within 45 days.',
-      hidden_fees_detected: [
-        '20% Mandatory Production Administration Surcharge',
-        '$450 Late Strike / Load-Out Fee after 11:30 PM',
-      ],
-      risk_clauses: [
-        {
-          clause: 'Unilateral Substitution of Seasonal Stems / Materials without Prior Notice',
-          severity: 'medium',
-          recommendation: 'Require written approval for any focal floral or linen substitution.',
-        },
-        {
-          clause: 'Client Liability for Venue Power Surge or Weather Damage to Equipment',
-          severity: 'high',
-          recommendation: 'Verify vendor carries primary inland marine equipment insurance.',
-        },
-      ],
-      line_items: [
-        { description: `${serviceType || 'Core Event Package'} Base Scope`, amount: extractedBase, included: true },
-        { description: ' Late-Night Strike & Freight Crew', amount: 450, included: false },
-      ],
-    };
+    // Deterministic parser: reads the real numbers and clauses from the pasted text
+    const fallbackTerms: ParsedVendorTerms = parseQuoteText(sanitized.sanitizedText, {
+      serviceType: typeof serviceType === 'string' ? serviceType : undefined,
+    });
+    if (fallbackTerms.base_fee <= 0) {
+      return res.status(422).json({
+        error:
+          'I couldn’t find any prices in that text. Paste the quote including dollar amounts (e.g. “Package: $5,000, service charge 20%”).',
+      });
+    }
 
     res.json({
-      vendorName: vendorName || 'Atelier Botanica & Design',
-      serviceType: serviceType || 'Floral & Tablescape',
-      filename: filename || 'Vendor_Proposal_Parsed.pdf',
+      vendorName: String(vendorName || 'Prospective Vendor').slice(0, 80),
+      serviceType: String(serviceType || 'Event Services').slice(0, 60),
+      filename: String(filename || 'Pasted_Vendor_Quote.txt').slice(0, 120),
       parsed_terms: fallbackTerms,
       sanitizationWarnings: sanitized.warnings,
+      engine: 'local',
     });
   });
 
@@ -529,8 +556,8 @@ ${sanitized.sanitizedText}`,
           text: `Decompose this event mood board / creative direction into a structured luxury event design palette. Creative brief: "${cleanPrompt}"`,
         });
 
-        const response = await ai.models.generateContent({
-          model: 'gemini-3.8-flash',
+        const response = await withTimeout(ai.models.generateContent({
+          model: MODELS.reasoning,
           contents: { parts },
           config: {
             systemInstruction:
@@ -559,12 +586,12 @@ ${sanitized.sanitizedText}`,
               },
             },
           },
-        });
+        }));
 
-        const parsed = JSON.parse((response.text ?? '{}').trim());
+        const parsed = parseModelJson(response.text);
         const palette: MoodboardPalette = {
           id: `mb_${Date.now()}`,
-          event_id: eventId || 'evt_wedding_01',
+          event_id: String(eventId || 'evt_unknown'),
           title: parsed.title || 'Bespoke Editorial Scenography',
           style_archetype: parsed.style_archetype || 'Modern Architectural Organic',
           color_Swatches: Array.isArray(parsed.color_Swatches) && parsed.color_Swatches.length > 0
@@ -591,38 +618,17 @@ ${sanitized.sanitizedText}`,
 
         res.json(palette);
         return;
-      } catch {
+      } catch (err) {
+        noteGeminiFailure('analyze-moodboard', err);
         // Fall through to deterministic moodboard decomposition
       }
     }
 
-    const fallbackPalette: MoodboardPalette = {
-      id: `mb_${Date.now()}`,
-      event_id: eventId || 'evt_wedding_01',
-      title: cleanPrompt ? `Curated Direction: ${cleanPrompt.slice(0, 38)}` : 'Mediterranean Twilight & Travertine',
-      style_archetype: 'Warm Architectural Minimalism',
-      color_Swatches: [
-        { hex: '#526354', name: 'Foliage Olive', usage: 'Botanical canopy & napkins' },
-        { hex: '#B86B4B', name: 'Kiln Terracotta', usage: 'Stoneware chargers & vases' },
-        { hex: '#F5F2EB', name: 'Chalk Limestone', usage: 'Cotton rag stationery & tablecloths' },
-        { hex: '#C9A66B', name: 'Aged Doré Brass', usage: 'Taper holders & flatware' },
-        { hex: '#232927', name: 'Espresso Iron', usage: 'Architectural framing & ink' },
-      ],
-      decor_elements: [
-        'Unbleached Belgian linen runners with deckle-edge place cards',
-        'Borosilicate hurricane sleeves housing tall beeswax tapers',
-        'Hand-carved travertine table numbers',
-      ],
-      lighting_atmosphere: '2400K warm ambient pin-spotting across floral centerpieces.',
-      floral_botanical_notes: [
-        'Fruiting olive boughs & white ranunculus',
-        'Potted culinary herbs (rosemary, sage, lavender)',
-      ],
-      culinary_dietary_pairings: [
-        'Charred citrus & fennel salad (Vegan / GF)',
-        'Handmade saffron pappardelle & botanical aperitif spritz',
-      ],
-    };
+    const fallbackPalette: MoodboardPalette = generateMoodboard({
+      prompt: cleanPrompt,
+      eventId: String(eventId || 'evt_unknown'),
+      eventType: typeof req.body?.eventType === 'string' ? req.body.eventType : undefined,
+    });
 
     res.json(fallbackPalette);
   });
@@ -687,8 +693,8 @@ ${sanitized.sanitizedText}`,
     const ai = createGeminiClient();
     if (ai) {
       try {
-        const response = await ai.models.generateContent({
-          model: 'gemini-3-flash-preview',
+        const response = await withTimeout(ai.models.generateContent({
+          model: MODELS.fast,
           contents: `Use explicit Chain-of-Thought (CoT) reasoning to analyze this event and build specific, nuanced sub-categories and ritual checklists BEFORE returning the final modules:
 - Event Type: "${cleanType}"
 - Location / Region: "${cleanLocation}"
@@ -787,9 +793,9 @@ CHAIN-OF-THOUGHT INSTRUCTIONS (Complete "chain_of_thought_analysis" FIRST):
               },
             },
           },
-        });
+        }));
 
-        const parsed = JSON.parse((response.text ?? '{}').trim());
+        const parsed = parseModelJson(response.text);
         if (Array.isArray(parsed.modules) && parsed.modules.length > 0) {
           const builtModules: CustomEventModule[] = parsed.modules.map(
             (m: any, idx: number) => ({
@@ -863,7 +869,8 @@ CHAIN-OF-THOUGHT INSTRUCTIONS (Complete "chain_of_thought_analysis" FIRST):
           });
           return;
         }
-      } catch {
+      } catch (err) {
+        noteGeminiFailure('generate-custom-modules', err);
         // Fall through to deterministic cultural/location generator
       }
     }
@@ -902,129 +909,15 @@ CHAIN-OF-THOUGHT INSTRUCTIONS (Complete "chain_of_thought_analysis" FIRST):
     const tempEventId = String(currentDraft.id || `evt_ai_${Date.now()}`);
     const lower = cleanMessage.toLowerCase();
 
-    // Smart heuristic extraction as baseline before/alongside LLM
-    let detectedType: string = currentDraft.event_type || 'wedding';
-    if (
-      lower.includes('funeral') ||
-      lower.includes('memorial') ||
-      lower.includes('celebration of life') ||
-      lower.includes('eulogy') ||
-      lower.includes('bereavement') ||
-      lower.includes('wake')
-    ) {
-      detectedType = 'funeral';
-    } else if (lower.includes('birthday') || lower.includes('bday') || lower.includes('anniversary')) {
-      detectedType = 'birthday';
-    } else if (
-      lower.includes('summit') ||
-      lower.includes('conference') ||
-      lower.includes('community') ||
-      lower.includes('gala') ||
-      lower.includes('corporate')
-    ) {
-      detectedType = 'community';
-    } else if (
-      lower.includes('wedding') ||
-      lower.includes('shaadi') ||
-      lower.includes('sangeet') ||
-      lower.includes('nikah') ||
-      lower.includes('bridal')
-    ) {
-      detectedType = 'wedding';
-    }
-
-    // Location extraction
-    let detectedLocation: string = currentDraft.location || '';
-    const locMatch = cleanMessage.match(
-      /\b(?:in|at|near)\s+([A-Z][a-zA-Z\s,.-]{2,40}?)(?=\s+(?:for|with|on|budget|guests|people|under|need|and|\d|$))/
-    );
-    if (locMatch?.[1]) {
-      detectedLocation = locMatch[1].trim();
-    } else if (lower.includes('india') || lower.includes('udaipur') || lower.includes('jaipur') || lower.includes('mumbai') || lower.includes('delhi') || lower.includes('goa')) {
-      if (lower.includes('udaipur')) detectedLocation = 'Udaipur, Rajasthan, India';
-      else if (lower.includes('jaipur')) detectedLocation = 'Jaipur, Rajasthan, India';
-      else if (lower.includes('mumbai')) detectedLocation = 'Mumbai, Maharashtra, India';
-      else if (lower.includes('goa')) detectedLocation = 'Goa, India';
-      else detectedLocation = 'Udaipur, India';
-    } else if (lower.includes('boston')) {
-      detectedLocation = 'Boston, MA, USA';
-    } else if (lower.includes('chicago')) {
-      detectedLocation = 'Chicago, IL, USA';
-    } else if (lower.includes('new york') || lower.includes('nyc')) {
-      detectedLocation = 'New York, NY, USA';
-    } else if (lower.includes('sonoma') || lower.includes('napa')) {
-      detectedLocation = 'Sonoma & Napa Valley, CA, USA';
-    } else if (!detectedLocation) {
-      detectedLocation =
-        detectedType === 'funeral'
-          ? 'Boston, MA — Memorial Chapel & Conservatory'
-          : 'Sonoma Valley, CA, USA';
-    }
-
-    // Days extraction
-    let detectedDays: number = Number(currentDraft.event_days) || 0;
-    const daysMatch = cleanMessage.match(/(\d+)\s*[- ]?\s*day/i);
-    if (daysMatch?.[1]) {
-      detectedDays = Math.max(1, Math.min(14, Number(daysMatch[1])));
-    } else if (!detectedDays) {
-      const isIndiaLoc =
-        detectedLocation.toLowerCase().includes('india') ||
-        lower.includes('india') ||
-        lower.includes('indian');
-      if (detectedType === 'funeral') detectedDays = 1;
-      else if (detectedType === 'wedding' && isIndiaLoc) detectedDays = 5;
-      else if (detectedType === 'wedding') detectedDays = 2;
-      else detectedDays = 1;
-    }
-
-    // Guest count extraction
-    let detectedGuests: number = Number(currentDraft.guest_count) || 0;
-    const guestMatch = cleanMessage.match(/(\d{2,4})\s*(?:guests|people|attendees|persons|pax)/i);
-    if (guestMatch?.[1]) {
-      detectedGuests = Math.max(10, Number(guestMatch[1]));
-    } else if (!detectedGuests) {
-      detectedGuests = detectedType === 'funeral' ? 120 : detectedType === 'wedding' ? 180 : 100;
-    }
-
-    // Budget extraction
-    let detectedBudget: number = Number(currentDraft.target_budget) || 0;
-    const kBudgetMatch = cleanMessage.match(/\$?\s*(\d+(?:\.\d+)?)\s*k\b/i);
-    const fullBudgetMatch = cleanMessage.match(/\$\s*([\d,]{4,9})/);
-    if (kBudgetMatch?.[1]) {
-      detectedBudget = Math.round(Number(kBudgetMatch[1]) * 1000);
-    } else if (fullBudgetMatch?.[1]) {
-      detectedBudget = Math.round(Number(fullBudgetMatch[1].replace(/,/g, '')));
-    } else if (!detectedBudget) {
-      detectedBudget =
-        detectedType === 'funeral'
-          ? 14500
-          : detectedDays >= 4
-          ? 85000
-          : detectedType === 'wedding'
-          ? 55000
-          : 25000;
-    }
-
-    // Title extraction
-    let detectedTitle: string = currentDraft.title || '';
-    if (!detectedTitle || lower.includes('funeral') || lower.includes('wedding') || lower.includes('birthday')) {
-      if (detectedType === 'funeral') {
-        detectedTitle =
-          cleanMessage.length < 65 && cleanMessage.trim().length > 4
-            ? cleanMessage.trim()
-            : `Memorial & Celebration of Life (${detectedLocation.split(',')[0]})`;
-      } else if (detectedType === 'wedding' && detectedDays >= 4) {
-        detectedTitle = `${detectedDays}-Day Indian Destination Wedding (${detectedLocation.split(',')[0]})`;
-      } else if (detectedType === 'wedding') {
-        detectedTitle = `${detectedDays}-Day Wedding Celebration (${detectedLocation.split(',')[0]})`;
-      } else if (detectedType === 'birthday') {
-        detectedTitle = `Milestone Birthday Celebration (${detectedLocation.split(',')[0]})`;
-      } else {
-        detectedTitle = `${cleanMessage.slice(0, 42).trim() || 'Custom Event Plan'}`;
-      }
-    }
-
-    let detectedDate: string = currentDraft.date || (detectedType === 'funeral' ? '2026-11-18' : '2027-06-19');
+    // Deterministic extraction as the baseline before / instead of the LLM
+    const parsedIntake = parseIntake(cleanMessage, currentDraft);
+    const detectedType = parsedIntake.event_type;
+    const detectedLocation = parsedIntake.location;
+    const detectedDays = parsedIntake.event_days;
+    const detectedGuests = parsedIntake.guest_count;
+    const detectedBudget = parsedIntake.target_budget;
+    const detectedTitle = parsedIntake.title;
+    const detectedDate = parsedIntake.date;
 
     const ai = createGeminiClient();
     if (ai) {
@@ -1036,8 +929,8 @@ CHAIN-OF-THOUGHT INSTRUCTIONS (Complete "chain_of_thought_analysis" FIRST):
               .join('\n')
           : '';
 
-        const response = await ai.models.generateContent({
-          model: 'gemini-3-flash-preview',
+        const response = await withTimeout(ai.models.generateContent({
+          model: MODELS.fast,
           contents: `Conversation History:
 ${historyText}
 Latest User Message: "${cleanMessage}"
@@ -1125,17 +1018,17 @@ Instructions:
               },
             },
           },
-        });
+        }));
 
-        const parsed = JSON.parse((response.text ?? '{}').trim());
+        const parsed = parseModelJson(response.text);
         const draft = parsed.event_draft || {};
         const finalTitle = String(draft.title || detectedTitle);
         const finalType = String(draft.event_type || detectedType).toLowerCase();
         const finalLocation = String(draft.location || detectedLocation);
         const finalDays = Math.max(1, Math.min(14, Number(draft.event_days) || detectedDays));
-        const finalGuests = Math.max(10, Number(draft.guest_count) || detectedGuests);
-        const finalBudget = Math.max(1000, Number(draft.target_budget) || detectedBudget);
-        const finalDate = String(draft.date || detectedDate);
+        const finalGuests = Math.min(50_000, Math.max(1, Math.round(Number(draft.guest_count)) || detectedGuests));
+        const finalBudget = Math.max(500, Number(draft.target_budget) || detectedBudget);
+        const finalDate = isValidIsoDate(draft.date) ? String(draft.date) : detectedDate;
 
         const builtModules: CustomEventModule[] =
           Array.isArray(parsed.modules) && parsed.modules.length > 0
@@ -1222,7 +1115,8 @@ Instructions:
           hotelBlocks: builtHotels,
         });
         return;
-      } catch {
+      } catch (err) {
+        noteGeminiFailure('ai-intake-chat', err);
         // Fall through to deterministic response below
       }
     }
@@ -1447,8 +1341,8 @@ Instructions:
     const ai = createGeminiClient();
     if (ai) {
       try {
-        const searchResponse = await ai.models.generateContent({
-          model: 'gemini-3-flash-preview',
+        const searchResponse = await withTimeout(ai.models.generateContent({
+          model: MODELS.fast,
           contents: `Search online for real, affordable, well-rated hotels near "${cleanLoc}" (for a ${eventType} group room block with target budget under $${budgetCap}/night).
 ${osmHotelNames.length > 0 ? `Include or compare these real local hotels found on OpenStreetMap: ${osmHotelNames.map((h) => h.name).join(', ')}.` : ''}
 Return ONLY a valid JSON array of 4 hotels sorted from cheapest nightly price to mid-range group value, with fields:
@@ -1468,7 +1362,7 @@ Return ONLY a valid JSON array of 4 hotels sorted from cheapest nightly price to
           config: {
             tools: [{ googleSearch: {} }],
           },
-        });
+        }));
 
         const rawText = (searchResponse.text ?? '').trim();
         const jsonMatch = rawText.match(/\[[\s\S]*\]/);
@@ -1539,7 +1433,8 @@ Return ONLY a valid JSON array of 4 hotels sorted from cheapest nightly price to
             return;
           }
         }
-      } catch {
+      } catch (err) {
+        noteGeminiFailure('hotel-grounding', err);
         // Fall through to OSM + regional live deal synthesis
       }
     }
@@ -1727,6 +1622,84 @@ Return ONLY a valid JSON array of 4 hotels sorted from cheapest nightly price to
     });
   });
 
+  // 9. Personalised idea generator (Gemini when available, deterministic engine otherwise)
+  app.post('/api/agents/ideas', async (req: Request, res: Response) => {
+    const b = req.body ?? {};
+    const request = {
+      eventType: String(b.eventType ?? 'community').slice(0, 60),
+      title: String(b.title ?? '').slice(0, 120),
+      location: String(b.location ?? '').slice(0, 120),
+      guestCount: Math.min(50_000, Math.max(1, Math.round(Number(b.guestCount)) || 50)),
+      targetBudget: Math.min(1e9, Math.max(0, Number(b.targetBudget) || 0)),
+      interests: sanitizeUntrustedInput(String(b.interests ?? '').slice(0, 200)).sanitizedText,
+      vibe: String(b.vibe ?? '').slice(0, 30),
+    };
+    const baseline: IdeaSet = generateIdeas(request, Math.floor(Math.random() * 1000));
+
+    const ai = createGeminiClient();
+    if (ai) {
+      try {
+        const response = await withTimeout(
+          ai.models.generateContent({
+            model: MODELS.fast,
+            contents: `Event: ${JSON.stringify(request)}
+Give 9 distinct, specific, personalised ideas (themes, activities, food & drink, decor, favors, guest experiences) plus 2 money-saving tips that fit the budget of about $${Math.round(request.targetBudget / request.guestCount)} per guest.`,
+            config: {
+              systemInstruction:
+                'You are a warm, practical event-planning creative director. Be concrete and culturally sensitive. Never invent prices for specific vendors. estCostPerGuest is an estimate in USD.',
+              responseMimeType: 'application/json',
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  ideas: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        category: { type: Type.STRING },
+                        title: { type: Type.STRING },
+                        description: { type: Type.STRING },
+                        estCostPerGuest: { type: Type.NUMBER },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          }),
+          25_000
+        );
+        const parsed = parseModelJson(response.text);
+        const allowed = new Set(['Theme', 'Activity', 'Food & Drink', 'Decor', 'Favor', 'Money-saver', 'Guest experience']);
+        const ideas: IdeaCard[] = (Array.isArray(parsed.ideas) ? parsed.ideas : [])
+          .filter((i: any) => i && typeof i.title === 'string' && i.title.trim())
+          .slice(0, 14)
+          .map((i: any, idx: number) => ({
+            id: `ai-${Date.now()}-${idx}`,
+            category: allowed.has(i.category) ? i.category : 'Guest experience',
+            title: redactSensitiveStrings(String(i.title)).slice(0, 140),
+            description: redactSensitiveStrings(String(i.description ?? '')).slice(0, 400),
+            estCostPerGuest:
+              Number.isFinite(Number(i.estCostPerGuest)) && Number(i.estCostPerGuest) > 0
+                ? Math.round(Number(i.estCostPerGuest))
+                : undefined,
+          }));
+        if (ideas.length >= 3) {
+          res.json({ source: 'gemini', set: { ...baseline, ideas } });
+          return;
+        }
+      } catch (err) {
+        noteGeminiFailure('ideas', err);
+      }
+    }
+    res.json({ source: 'local', set: baseline });
+  });
+
+  // Unknown API routes return JSON, never the SPA shell
+  app.use('/api', (_req: Request, res: Response) => {
+    res.status(404).json({ error: 'Unknown API endpoint' });
+  });
+
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -1735,15 +1708,49 @@ Return ONLY a valid JSON array of 4 hotels sorted from cheapest nightly price to
     app.use(vite.middlewares);
   } else {
     const distPath = path.resolve(__dirname, 'dist');
-    app.use(express.static(distPath));
+    app.use(express.static(distPath, { maxAge: '1h', index: false }));
     app.get('*', (_req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`PlanGenie Enterprise Server running on http://0.0.0.0:${PORT}`);
+  // Centralised error handler: malformed JSON, oversized bodies, unexpected throws
+  app.use((err: any, _req: Request, res: Response, _next: express.NextFunction) => {
+    const status = err?.status === 413 || err?.type === 'entity.too.large' ? 413 : err?.type === 'entity.parse.failed' ? 400 : 500;
+    if (status === 500) console.error('[server] unhandled error:', err);
+    if (res.headersSent) return;
+    res.status(status).json({
+      error:
+        status === 413
+          ? 'That upload is too large.'
+          : status === 400
+            ? 'Malformed request body.'
+            : 'Something went wrong on our side. Please try again.',
+    });
+  });
+
+  const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`PlanGenie server running on http://0.0.0.0:${PORT}`);
+    console.log(
+      isConfiguredGeminiKey(process.env.GEMINI_API_KEY)
+        ? `AI mode: Gemini (${MODELS.fast}) with automatic local-engine fallback`
+        : 'AI mode: built-in deterministic engine (set GEMINI_API_KEY to enable Gemini)'
+    );
+  });
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    console.error(err.code === 'EADDRINUSE' ? `Port ${PORT} is already in use.` : err);
+    process.exit(1);
   });
 }
 
-startServer();
+process.on('unhandledRejection', (reason) => {
+  console.error('[server] unhandled rejection:', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[server] uncaught exception:', err);
+});
+
+startServer().catch((err) => {
+  console.error('Failed to start server:', err);
+  process.exit(1);
+});

@@ -1,0 +1,64 @@
+/**
+ * Resilient JSON fetch helper: timeout, HTTP error normalisation and a
+ * guaranteed-typed result so UI code never has to wrap fetch in try/catch.
+ */
+
+export type ApiResult<T> =
+  | { ok: true; data: T }
+  | { ok: false; error: string; status?: number };
+
+export async function postJson<T = unknown>(
+  url: string,
+  body: unknown,
+  opts: { timeoutMs?: number; headers?: Record<string, string> } = {}
+): Promise<ApiResult<T>> {
+  return requestJson<T>(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(opts.headers ?? {}) },
+    body: JSON.stringify(body ?? {}),
+    timeoutMs: opts.timeoutMs,
+  });
+}
+
+export async function getJson<T = unknown>(
+  url: string,
+  opts: { timeoutMs?: number } = {}
+): Promise<ApiResult<T>> {
+  return requestJson<T>(url, { method: 'GET', timeoutMs: opts.timeoutMs });
+}
+
+async function requestJson<T>(
+  url: string,
+  init: RequestInit & { timeoutMs?: number }
+): Promise<ApiResult<T>> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), init.timeoutMs ?? 45_000);
+  try {
+    const res = await fetch(url, { ...init, signal: controller.signal });
+    const text = await res.text();
+    let data: unknown = null;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      data = null;
+    }
+    if (!res.ok) {
+      const msg =
+        data && typeof data === 'object' && 'error' in data
+          ? String((data as { error: unknown }).error)
+          : `Request failed (${res.status})`;
+      return { ok: false, error: msg, status: res.status };
+    }
+    return { ok: true, data: data as T };
+  } catch (err) {
+    const aborted = err instanceof DOMException && err.name === 'AbortError';
+    return {
+      ok: false,
+      error: aborted
+        ? 'The request timed out. Please try again.'
+        : 'Network unavailable — working offline with the built-in planning engine.',
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}

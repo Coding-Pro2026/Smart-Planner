@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react';
+import { postJson } from '../lib/api';
+import { buildIcs, downloadTextFile, safeFilename } from '../lib/exporters';
 import {
   AlertCircle,
   Calendar,
@@ -64,6 +66,7 @@ export const ThemeAndRsvpView: React.FC<ThemeAndRsvpViewProps> = ({
   const [visionPrompt, setVisionPrompt] = useState('');
   const [uploadedPreviewUrl, setUploadedPreviewUrl] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [moodboardError, setMoodboardError] = useState<string | null>(null);
   const [copiedHex, setCopiedHex] = useState<string | null>(null);
 
   // Guest RSVP Form State
@@ -206,8 +209,52 @@ export const ThemeAndRsvpView: React.FC<ThemeAndRsvpViewProps> = ({
     }
   };
 
+  const pendingEmails = rsvps
+    .filter((r) => r.status === 'pending' && isValidEmailAddress(r.contact))
+    .map((r) => r.contact.trim());
+
+  const inviteText = `You're invited to ${event.title}!\n\nWhen: ${event.date}\nWhere: ${event.location}\n\nPlease reply with your attendance (and any dietary needs) so we can plan perfectly. We can't wait to celebrate with you!`;
+
+  const handleMailtoReminder = () => {
+    if (pendingEmails.length === 0) return;
+    const subject = encodeURIComponent(`Please RSVP: ${event.title}`);
+    const body = encodeURIComponent(inviteText);
+    // BCC keeps guests' addresses private; keep the URL within common mail-client limits.
+    const bcc = encodeURIComponent(pendingEmails.slice(0, 40).join(','));
+    window.location.href = `mailto:?bcc=${bcc}&subject=${subject}&body=${body}`;
+    setCalendarFeedback({
+      type: 'success',
+      message:
+        pendingEmails.length > 40
+          ? `Opened your email app with the first 40 of ${pendingEmails.length} guests — send again for the rest.`
+          : `Opened your email app with ${pendingEmails.length} guest(s) in BCC.`,
+    });
+  };
+
+  const handleCopyInviteText = async () => {
+    try {
+      await navigator.clipboard.writeText(inviteText);
+      setCalendarFeedback({ type: 'success', message: 'Invite message copied to your clipboard.' });
+    } catch {
+      setCalendarFeedback({ type: 'error', message: 'Clipboard is not available — select and copy the text manually.' });
+    }
+  };
+
+  const handleDownloadInviteIcs = () => {
+    const ok = downloadTextFile(
+      safeFilename(`${event.title}-invite`, 'ics'),
+      buildIcs({ event, tasks: [], vendors: [], rsvps: [], budget: null, budgetItems: [] }),
+      'text/calendar'
+    );
+    setCalendarFeedback(
+      ok
+        ? { type: 'success', message: 'Calendar invite downloaded — attach it to your invitations.' }
+        : { type: 'error', message: 'Download is not supported in this browser.' }
+    );
+  };
+
   const handleCopyHex = (hex: string) => {
-    navigator.clipboard?.writeText(hex);
+    navigator.clipboard?.writeText(hex).catch(() => undefined);
     setCopiedHex(hex);
     setTimeout(() => setCopiedHex(null), 1500);
   };
@@ -215,6 +262,15 @@ export const ThemeAndRsvpView: React.FC<ThemeAndRsvpViewProps> = ({
   const handleImageFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setMoodboardError('Please choose an image file (JPG, PNG or WebP).');
+      return;
+    }
+    if (file.size > 5_000_000) {
+      setMoodboardError('That image is over 5 MB — please choose a smaller one.');
+      return;
+    }
+    setMoodboardError(null);
     const reader = new FileReader();
     reader.onload = () => {
       if (typeof reader.result === 'string') {
@@ -226,26 +282,27 @@ export const ThemeAndRsvpView: React.FC<ThemeAndRsvpViewProps> = ({
 
   const handleRunMoodboardAgent = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isAnalyzing) return;
     setIsAnalyzing(true);
-    try {
-      const response = await fetch('/api/agents/analyze-moodboard', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          eventId: event.id,
-          prompt:
-            visionPrompt.trim() ||
-            `Luxury ${event.event_type} tablescape at ${event.location} with architectural lighting`,
-          imageBase64: uploadedPreviewUrl,
-          mimeType: 'image/jpeg',
-        }),
-      });
-      const data = await response.json();
-      if (data && data.color_Swatches) {
-        onUpdateMoodboard(data);
-      }
-    } finally {
-      setIsAnalyzing(false);
+    setMoodboardError(null);
+    const res = await postJson<MoodboardPalette>(
+      '/api/agents/analyze-moodboard',
+      {
+        eventId: event.id,
+        eventType: event.event_type,
+        prompt:
+          visionPrompt.trim() ||
+          `${event.event_type} at ${event.location} with warm, elegant styling`,
+        imageBase64: uploadedPreviewUrl,
+        mimeType: uploadedPreviewUrl?.match(/^data:([^;]+);/)?.[1] ?? 'image/jpeg',
+      },
+      { timeoutMs: 60_000 }
+    );
+    setIsAnalyzing(false);
+    if (res.ok && res.data && Array.isArray(res.data.color_Swatches)) {
+      onUpdateMoodboard({ ...res.data, event_id: event.id });
+    } else {
+      setMoodboardError(res.ok ? 'No palette was returned. Please try again.' : res.error);
     }
   };
 
@@ -415,6 +472,40 @@ export const ThemeAndRsvpView: React.FC<ThemeAndRsvpViewProps> = ({
                 </span>
               </>
             )}
+          </div>
+        </div>
+
+        {/* Keyless alternatives: work without any Google/Firebase configuration */}
+        <div className="pt-4 border-t border-stone-100 space-y-3">
+          <div>
+            <h4 className="text-xs font-bold text-stone-900">Invite guests without Google</h4>
+            <p className="text-[11px] text-stone-500">
+              No account needed — email your guests directly, or share a calendar file they can open in any app.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={pendingEmails.length === 0}
+              onClick={handleMailtoReminder}
+              className="px-3.5 py-2 text-xs font-semibold text-[#4A6B53] bg-[#EDF3EE] hover:bg-[#DFECE1] disabled:opacity-50 rounded-xl"
+            >
+              Email {pendingEmails.length} guest{pendingEmails.length === 1 ? '' : 's'} awaiting reply
+            </button>
+            <button
+              type="button"
+              onClick={handleCopyInviteText}
+              className="px-3.5 py-2 text-xs font-semibold text-stone-700 bg-stone-100 hover:bg-stone-200 rounded-xl"
+            >
+              Copy invite message
+            </button>
+            <button
+              type="button"
+              onClick={handleDownloadInviteIcs}
+              className="px-3.5 py-2 text-xs font-semibold text-stone-700 bg-stone-100 hover:bg-stone-200 rounded-xl"
+            >
+              Download invite (.ics)
+            </button>
           </div>
         </div>
 
@@ -715,6 +806,11 @@ export const ThemeAndRsvpView: React.FC<ThemeAndRsvpViewProps> = ({
                 'Generate Palette & Decor Ideas'
               )}
             </button>
+            {moodboardError && (
+              <p role="alert" className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2">
+                {moodboardError}
+              </p>
+            )}
           </form>
         </div>
 

@@ -1,3 +1,5 @@
+import { postJson } from '../lib/api';
+import { parseIntake } from '../lib/intakeParser';
 import React, { useEffect, useState } from 'react';
 import {
   ArrowLeft,
@@ -133,79 +135,64 @@ export const EntryModeAndAiIntakeView: React.FC<EntryModeAndAiIntakeViewProps> =
     setIsThinking(true);
 
     try {
-      const response = await fetch('/api/agents/ai-intake-chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const res = await postJson<{
+        assistantReply?: string;
+        eventDraft?: DraftEventBlueprint;
+        modules?: CustomEventModule[];
+        hotelBlocks?: HotelRoomBlockRecord[];
+      }>(
+        '/api/agents/ai-intake-chat',
+        {
           message: raw,
-          conversationHistory: nextHistory.map((m) => ({
+          conversationHistory: nextHistory.slice(-12).map((m) => ({
             role: m.role,
             content: m.content,
           })),
           currentDraft: blueprint || {},
-        }),
-      });
-      const data = await response.json();
+        },
+        { timeoutMs: 40_000 }
+      );
 
-      if (data?.eventDraft) {
-        setBlueprint(data.eventDraft);
+      if (!res.ok || !res.data?.eventDraft) {
+        throw new Error(res.ok ? 'empty response' : res.error);
       }
-      if (Array.isArray(data?.modules)) {
-        setImprovisedModules(data.modules);
-      }
-      if (Array.isArray(data?.hotelBlocks)) {
-        setImprovisedHotels(data.hotelBlocks);
-      }
+      const data = res.data;
+      setBlueprint(data.eventDraft!);
+      if (Array.isArray(data.modules)) setImprovisedModules(data.modules);
+      if (Array.isArray(data.hotelBlocks)) setImprovisedHotels(data.hotelBlocks);
 
       const aiMsg: IntakeChatMessage = {
         id: `a_${Date.now()}`,
         role: 'assistant',
         content:
-          data?.assistantReply ||
+          data.assistantReply ||
           'I have updated your event blueprint and improvised custom tabs on the right. Click "Enter Workspace with Custom Tabs" whenever you are ready!',
         timestamp: new Date().toISOString(),
       };
       setMessages((prev) => [...prev, aiMsg]);
     } catch {
-      const fallbackId = blueprint?.id || `evt_ai_${Date.now()}`;
-      const isFuneral =
-        raw.toLowerCase().includes('funeral') ||
-        raw.toLowerCase().includes('memorial') ||
-        raw.toLowerCase().includes('eulogy');
-      const isIndia =
-        raw.toLowerCase().includes('india') ||
-        raw.toLowerCase().includes('udaipur') ||
-        raw.toLowerCase().includes('5-day') ||
-        raw.toLowerCase().includes('5 day');
-
+      // Server unreachable: run the same parser locally so the flow never dead-ends.
+      const parsed = parseIntake(raw, blueprint ?? {});
       const draft: DraftEventBlueprint = {
-        id: fallbackId,
-        title: isFuneral
-          ? 'Memorial & Celebration of Life'
-          : isIndia
-          ? '5-Day Indian Destination Wedding'
-          : 'Custom Event Plan',
-        event_type: isFuneral ? 'funeral' : 'wedding',
-        location: isFuneral
-          ? 'Boston, MA, USA'
-          : isIndia
-          ? 'Udaipur, Rajasthan, India'
-          : 'Sonoma Valley, CA, USA',
-        event_days: isFuneral ? 1 : isIndia ? 5 : 2,
-        guest_count: isFuneral ? 120 : 180,
-        target_budget: isFuneral ? 14500 : isIndia ? 85000 : 55000,
-        date: isFuneral ? '2026-11-18' : '2027-06-19',
+        id: parsed.id,
+        title: parsed.title,
+        event_type: parsed.event_type,
+        location: parsed.location,
+        event_days: parsed.event_days,
+        guest_count: parsed.guest_count,
+        target_budget: parsed.target_budget,
+        date: parsed.date,
       };
 
       const mods = generateContextualCustomModules({
-        eventId: fallbackId,
+        eventId: draft.id,
         eventType: draft.event_type,
         location: draft.location,
         eventDays: draft.event_days,
         customNotes: raw,
       });
       const hotels = generateDefaultHotelBlocks({
-        eventId: fallbackId,
+        eventId: draft.id,
         eventType: draft.event_type,
         location: draft.location,
         eventDate: draft.date,
@@ -221,7 +208,7 @@ export const EntryModeAndAiIntakeView: React.FC<EntryModeAndAiIntakeViewProps> =
         {
           id: `a_fallback_${Date.now()}`,
           role: 'assistant',
-          content: `I have prepared "${draft.title}" (${draft.event_type}, ${draft.event_days}d in ${draft.location}) with ${mods.length} custom tabs (${mods
+          content: `I have prepared "${draft.title}" (${draft.event_type}, ${draft.event_days}d in ${draft.location}, ${draft.guest_count} guests, $${draft.target_budget.toLocaleString()}, on ${draft.date}) with ${mods.length} custom tabs (${mods
             .map((m) => m.category_title)
             .join(', ')}) and ${hotels.length} hotel blocks. Click "Enter Workspace with Custom Tabs" to continue!`,
           timestamp: new Date().toISOString(),
@@ -237,7 +224,7 @@ export const EntryModeAndAiIntakeView: React.FC<EntryModeAndAiIntakeViewProps> =
     return (
       <div className="min-h-screen pg-aurora-bg text-stone-900 flex flex-col justify-between">
         {/* Clean Warm Header with Light/Dark Mode Toggle */}
-        <header className="bg-[#FAF6EC]/95 backdrop-blur-md border-b border-stone-200/80 px-6 lg:px-10 py-4 flex items-center justify-between">
+        <header className="bg-[#FAF6EC]/95 backdrop-blur-md border-b border-stone-200/80 px-4 sm:px-6 lg:px-10 py-3 sm:py-4 flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-3">
             <button
               type="button"
@@ -452,7 +439,7 @@ export const EntryModeAndAiIntakeView: React.FC<EntryModeAndAiIntakeViewProps> =
   return (
     <div className="min-h-screen pg-aurora-bg text-stone-900 flex flex-col">
       {/* Top Bar */}
-      <header className="bg-[#FAF6EC]/95 backdrop-blur-md border-b border-stone-200/80 px-6 lg:px-10 py-4 flex items-center justify-between gap-4">
+      <header className="bg-[#FAF6EC]/95 backdrop-blur-md border-b border-stone-200/80 px-4 sm:px-6 lg:px-10 py-3 sm:py-4 flex flex-wrap items-center justify-between gap-2 sm:gap-4">
         <div className="flex items-center gap-4">
           <button
             type="button"

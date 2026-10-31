@@ -506,8 +506,10 @@ export const EventVenueAndHotelsMap: React.FC<EventVenueAndHotelsMapProps> = ({
   onSelectVenueLocation,
   onLockInHotelDeal,
 }) => {
-  // Google Maps JS API key disabled — always use keyless interactive embed mode
-  const envApiKey = '';
+  // Uses the Google Maps JS SDK when VITE_GOOGLE_MAPS_API_KEY is set; otherwise
+  // falls back to the keyless interactive embed so the map always works.
+  const rawMapsKey = String(import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? '').trim();
+  const envApiKey = rawMapsKey.length >= 20 && !/YOUR_|PLACEHOLDER/i.test(rawMapsKey) ? rawMapsKey : '';
   const [selectedMapQuery, setSelectedMapQuery] = useState<string>(
     event.location
   );

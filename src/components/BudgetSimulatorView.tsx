@@ -104,7 +104,7 @@ export const BudgetSimulatorView: React.FC<BudgetSimulatorViewProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-1 p-1 bg-stone-200/70 rounded-xl">
+        <div className="flex flex-wrap items-center gap-1 p-1 bg-stone-200/70 rounded-xl max-w-full">
           <button
             type="button"
             onClick={() => setSubView('current')}
