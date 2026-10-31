@@ -96,7 +96,7 @@ function cleanName(prompt: string): string {
   return n.charAt(0).toUpperCase() + n.slice(1, 90);
 }
 
-export function buildLocalAssistantReply(promptRaw: string, ctx: AssistantContext): AssistantReply {
+function buildSingleReply(promptRaw: string, ctx: AssistantContext): AssistantReply {
   const prompt = String(promptRaw ?? '').trim();
   const lower = prompt.toLowerCase();
   const tasks = Array.isArray(ctx.tasksSummary) ? ctx.tasksSummary : [];
@@ -254,5 +254,30 @@ export function buildLocalAssistantReply(promptRaw: string, ctx: AssistantContex
     delegated_agents: ['Supervisor Agent'],
     content: `I can reschedule milestones, add budget items, create tasks and report on status for **${name}**. Try:\n${tips.map((t) => `- “${t}”`).join('\n')}`,
     proposed_actions: [],
+  };
+}
+
+/**
+ * Handles compound requests ("add a DJ for $900 and delay the venue by 2 weeks") by answering each
+ * clause separately and merging the proposals.
+ */
+export function buildLocalAssistantReply(promptRaw: string, ctx: AssistantContext): AssistantReply {
+  const prompt = String(promptRaw ?? '').trim();
+  const clauses = prompt
+    .split(/\s*(?:,\s*(?:and\s+)?|;\s*|\s+and\s+(?=(?:also\s+)?(?:add|delay|push|move|shift|postpone|reschedule|create|schedule|book)\b)|\s+then\s+|\s+also\s+)/i)
+    .map((c) => c.trim())
+    .filter((c) => c.length > 2);
+  if (clauses.length < 2 || clauses.length > 4) return buildSingleReply(prompt, ctx);
+
+  const parts = clauses.map((c) => buildSingleReply(c, ctx));
+  const withActions = parts.filter((p) => p.proposed_actions.length > 0);
+  if (withActions.length < 2) return buildSingleReply(prompt, ctx);
+
+  const delegated = Array.from(new Set(parts.flatMap((p) => p.delegated_agents)));
+  return {
+    sender_agent: 'Supervisor Agent',
+    delegated_agents: delegated,
+    content: `I split your request into ${withActions.length} actions:\n\n${withActions.map((p) => p.content).join('\n\n')}`,
+    proposed_actions: withActions.flatMap((p) => p.proposed_actions).map((a, i) => ({ ...a, id: `${a.id}_${i}` })),
   };
 }

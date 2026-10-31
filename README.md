@@ -86,6 +86,22 @@ terminate TLS at your proxy/platform and set `TRUST_PROXY=1`, point health check
 The app is stateless server-side (plans live in the user's browser), so it scales horizontally; note the rate limiter
 is per-instance.
 
+## Deploy to Netlify
+The repo ships a ready `netlify.toml`: the React app is served from Netlify's CDN and the whole API runs as one Netlify Function
+(`netlify/functions/api.ts`, wrapping the same Express app).
+
+1. Netlify → **Add new site → Import an existing project → GitHub** → pick this repo and branch. Build settings are read from `netlify.toml`.
+2. **Site configuration → Environment variables** (then redeploy):
+   - `VITE_LEGAL_OPERATOR`, `VITE_LEGAL_EMAIL` — shown on `/privacy` and `/terms` (build-time; required before going public)
+   - `NOMINATIM_CONTACT` — your email for OpenStreetMap's usage policy
+   - optional: `ENCRYPTION_MASTER_KEY` (32+ chars), `GEMINI_API_KEY` / `AI_PROVIDER`+`AI_API_KEY` (a shared server-side default AI; users can still bring their own)
+3. Or from a terminal: `npx netlify-cli login && npx netlify-cli deploy --build --prod`.
+
+Good to know on Netlify:
+- Functions are time-limited (~10 s by default), so `AI_TIMEOUT_MS=8500` is preset: if the AI provider is slower than that, the built-in engine answers instead of a 504. Raise it if your plan allows longer functions.
+- Moodboard images are limited to 3.5 MB (function payload cap). Rate limiting and the OpenStreetMap request throttle are per function instance.
+- Everything else (plans, keys) lives in the visitor's browser, so there is nothing to provision.
+
 ## Privacy Policy & Terms
 Published in-app at `/privacy` and `/terms` (linked from every footer and the AI Settings dialog). Before going public, set
 `VITE_LEGAL_OPERATOR`, `VITE_LEGAL_EMAIL` (and optionally `VITE_LEGAL_ADDRESS`, `VITE_LEGAL_GOVERNING_LAW`) at build time —

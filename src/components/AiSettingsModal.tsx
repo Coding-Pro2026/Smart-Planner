@@ -242,7 +242,7 @@ export function AiSettingsModal({
               </div>
             )}
             {models.length > 0 && (
-              <select size={5} value={cfg.model} onChange={(e) => set({ model: e.target.value })} className="w-full border border-stone-300 rounded-xl p-1 font-mono">
+              <select aria-label="Available models" size={5} value={cfg.model} onChange={(e) => set({ model: e.target.value })} className="w-full border border-stone-300 rounded-xl p-1 font-mono">
                 {models.map((m) => (
                   <option key={m.id} value={m.id}>{m.label ? `${m.label} — ${m.id}` : m.id}</option>
                 ))}

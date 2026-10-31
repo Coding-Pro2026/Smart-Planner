@@ -61,6 +61,8 @@ export interface SafeRequestOptions {
   timeoutMs?: number;
   maxBytes?: number;
   allowPrivate?: boolean;
+  /** Abort the upstream request (e.g. when our own client disconnects). */
+  signal?: AbortSignal;
 }
 
 export interface SafeResponse {
@@ -146,6 +148,10 @@ export function safeRequest(urlStr: string, opts: SafeRequestOptions): Promise<S
       }
     );
     req.on('timeout', () => req.destroy(new Error('Request to the AI provider timed out')));
+    if (opts.signal) {
+      if (opts.signal.aborted) req.destroy(new Error('Request cancelled'));
+      else opts.signal.addEventListener('abort', () => req.destroy(new Error('Request cancelled')), { once: true });
+    }
     req.on('error', reject);
     if (opts.body) req.write(opts.body);
     req.end();

@@ -695,6 +695,9 @@ export const CustomCategoriesAndHotelsView: React.FC<
                         <div className="flex items-start gap-3 min-w-0">
                           <button
                             type="button"
+                            role="checkbox"
+                            aria-checked={item.completed}
+                            aria-label={`Mark "${item.title}" as ${item.completed ? 'not done' : 'done'}`}
                             onClick={() => onToggleCustomItem(mod.id, item.id)}
                             className={`mt-0.5 w-4 h-4 rounded-md border flex items-center justify-center shrink-0 transition-colors ${
                               item.completed
@@ -1367,6 +1370,7 @@ export const CustomCategoriesAndHotelsView: React.FC<
             </div>
             <div className="grid grid-cols-2 gap-2.5">
               <select
+                aria-label="New category type"
                 value={newCatType}
                 onChange={(e) =>
                   setNewCatType(e.target.value as CustomModuleType)

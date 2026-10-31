@@ -1,0 +1,45 @@
+# PlanGenie on Netlify: static React app on the CDN + the API as one serverless function.
+[build]
+  command = "npm run build:web"
+  publish = "dist"
+  functions = "netlify/functions"
+
+[build.environment]
+  NODE_VERSION = "22"
+  # Netlify functions are time-limited (~10 s by default). Stop waiting on the AI provider just before
+  # that so users get the built-in engine's answer instead of a 504. Raise it if your plan allows longer.
+  AI_TIMEOUT_MS = "8500"
+
+[functions]
+  node_bundler = "esbuild"
+  # Ship these from node_modules instead of inlining them (they use dynamic require)
+  external_node_modules = ["express", "serverless-http", "dotenv"]
+
+# API -> function; everything else -> the SPA (so /privacy and /terms work on refresh)
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Security headers for the static site (keep the CSP in sync with src/server/api.ts)
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "SAMEORIGIN"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=()"
+    Cross-Origin-Opener-Policy = "same-origin-allow-popups"
+    Strict-Transport-Security = "max-age=15552000; includeSubDomains"
+    Content-Security-Policy = "default-src 'self'; script-src 'self' https://maps.googleapis.com https://accounts.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; media-src 'self' https://assets.mixkit.co; connect-src 'self' https://maps.googleapis.com https://www.googleapis.com https://accounts.google.com; frame-src https://www.openstreetmap.org https://accounts.google.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"

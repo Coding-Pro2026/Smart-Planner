@@ -4,7 +4,12 @@ import path from 'path';
 import {fileURLToPath} from 'url';
 import {defineConfig} from 'vite';
 
-export default defineConfig(() => {
+export default defineConfig(({ mode }) => {
+  if (mode === 'production' && (!process.env.VITE_LEGAL_OPERATOR || !process.env.VITE_LEGAL_EMAIL)) {
+    console.warn(
+      '\n\u26a0  VITE_LEGAL_OPERATOR / VITE_LEGAL_EMAIL are not set: /privacy and /terms will show an "operator not configured" notice to visitors.\n'
+    );
+  }
   return {
     plugins: [react(), tailwindcss()],
     resolve: {

@@ -96,7 +96,7 @@ export function resolveAiConfig(req: Request): { config: AiConfig; userSupplied:
   return null;
 }
 
-async function call(cfg: AiConfig, params: GenerateParams, fetcher: Fetcher, timeoutMs: number) {
+async function call(cfg: AiConfig, params: GenerateParams, fetcher: Fetcher, timeoutMs: number, signal?: AbortSignal) {
   const norm = normalizeRequest(params);
   const send = async (jsonMode: boolean) => {
     const spec = buildGenerateRequest(cfg, norm, { jsonMode });
@@ -106,6 +106,7 @@ async function call(cfg: AiConfig, params: GenerateParams, fetcher: Fetcher, tim
       body: spec.body,
       timeoutMs,
       allowPrivate: allowPrivate(),
+      signal,
     });
     let data: any = null;
     try {
@@ -117,6 +118,12 @@ async function call(cfg: AiConfig, params: GenerateParams, fetcher: Fetcher, tim
   };
 
   let { res, data } = await send(true);
+  // One quick retry for transient provider overload / rate-limit responses.
+  // (skipped on short serverless budgets where there is no time for a second attempt)
+  if ([429, 500, 502, 503, 504].includes(res.status) && !signal?.aborted && timeoutMs >= 20_000) {
+    await new Promise((r) => setTimeout(r, 1200));
+    ({ res, data } = await send(true));
+  }
   // Some OpenAI-compatible servers reject response_format; retry once without it.
   if (res.status === 400 && norm.wantJson && ['openrouter', 'custom'].includes(cfg.provider)) {
     ({ res, data } = await send(false));
@@ -132,7 +139,8 @@ export function createAiClient(
   cfg: AiConfig,
   userSupplied: boolean,
   fetcher: Fetcher = safeRequest,
-  timeoutMs = 45_000
+  timeoutMs = Math.max(2500, (Number(process.env.AI_TIMEOUT_MS) || 42_000) - 500),
+  signal?: AbortSignal
 ): AiClient {
   return {
     provider: cfg.provider,
@@ -145,7 +153,7 @@ export function createAiClient(
           cfg.provider !== 'gemini' && params.config?.tools
             ? { ...params, config: { ...params.config, tools: undefined } }
             : params;
-        return call(cfg, p, fetcher, timeoutMs);
+        return call(cfg, p, fetcher, timeoutMs, signal);
       },
     },
   };
@@ -168,7 +176,7 @@ export async function listModels(cfg: AiConfig, fetcher: Fetcher = safeRequest):
 
 /** Cheap end-to-end check: one tiny generation. */
 export async function testConnection(cfg: AiConfig, fetcher: Fetcher = safeRequest): Promise<{ sample: string }> {
-  const client = createAiClient(cfg, true, fetcher, 25_000);
+  const client = createAiClient(cfg, true, fetcher, Math.min(25_000, Math.max(2500, (Number(process.env.AI_TIMEOUT_MS) || 42_000) - 500)));
   const out = await client.models.generateContent({
     contents: 'Reply with the single word: ready',
     config: { systemInstruction: 'You are a connectivity check. Reply with one word.' },
