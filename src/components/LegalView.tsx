@@ -1,6 +1,7 @@
 import React from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { LEGAL } from '../lib/legalConfig';
+import { Backdrop } from './design/Backdrop';
 
 type Doc = 'privacy' | 'terms';
 
@@ -255,7 +256,8 @@ export function LegalView({ doc }: { doc: Doc }) {
   }, [title]);
 
   return (
-    <div className="min-h-screen pg-aurora-bg text-stone-900">
+    <div className="min-h-screen pg-grain relative text-stone-900">
+      <Backdrop variant="workspace" />
       <header className="px-4 sm:px-6 lg:px-10 py-4 flex flex-wrap items-center justify-between gap-3 border-b border-stone-200/80 bg-white/90 backdrop-blur-md">
         <a href="/" className="inline-flex items-center gap-2 text-sm font-semibold text-stone-700 hover:text-stone-900">
           <ArrowLeft className="w-4 h-4" /> Back to PlanGenie

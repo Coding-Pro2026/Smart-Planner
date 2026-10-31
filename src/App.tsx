@@ -82,6 +82,10 @@ import { ReadinessCard } from './components/ReadinessCard';
 import { ExportMenu } from './components/ExportMenu';
 import { AiSettingsModal } from './components/AiSettingsModal';
 import { GettingStartedCard } from './components/GettingStartedCard';
+import { AnimatePresence, MotionConfig, motion } from 'motion/react';
+import { Backdrop } from './components/design/Backdrop';
+import { PageCurtain } from './components/design/PageCurtain';
+import { CountUp } from './components/design/primitives';
 import { LegalView } from './components/LegalView';
 import { AI_CONFIG_EVENT, AI_WARNING_EVENT, aiLabel, isAiConfigured, loadAiConfig } from './lib/aiConfig';
 import { KeyRound } from 'lucide-react';
@@ -1418,14 +1422,14 @@ export default function App() {
         <button
           type="button"
           onClick={() => setIsAiSettingsOpen(true)}
-          className={`fixed bottom-5 left-5 z-40 inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold rounded-full shadow-lg border transition-colors ${
+          className={`fixed bottom-5 right-5 z-40 inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold rounded-full shadow-lg border transition-colors ${
             aiConnected
               ? 'bg-white text-[#3b5943] border-[#b7d0be]'
               : 'bg-amber-50 text-amber-900 border-amber-200 hover:bg-amber-100'
           }`}
         >
           <KeyRound className="w-3.5 h-3.5" />
-          {aiStatusLabel}
+          <span className="hidden sm:inline">{aiStatusLabel}</span>
         </button>
       )}
       <AiSettingsModal isOpen={isAiSettingsOpen} onClose={() => setIsAiSettingsOpen(false)} onToast={pushToast} />
@@ -1433,9 +1437,10 @@ export default function App() {
     </>
   );
 
-  // Render Flagship Product Landing Page with Interactive Video Reel & Animations
+  // Each screen is rendered through one animated switch (fade + curtain wipe) so changes feel cinematic.
+  const renderScreen = (): { key: string; node: React.ReactNode } => {
   if (entryMode === 'landing') {
-    return (
+    return { key: 'landing', node: (
       <>
       <ProductLandingPageView
         existingEvents={events}
@@ -1457,12 +1462,12 @@ export default function App() {
       />
       {aiOverlays(true)}
       </>
-    );
+    ) };
   }
 
   // Render "Plan with AI" vs "Plan Without AI" Start Screen or Standard AI Chat Intake
   if (entryMode === 'chooser' || entryMode === 'ai_chat_intake') {
-    return (
+    return { key: 'entry', node: (
       <>
       <EntryModeAndAiIntakeView
         mode={entryMode}
@@ -1481,11 +1486,12 @@ export default function App() {
       />
       {aiOverlays(true)}
       </>
-    );
+    ) };
   }
 
-  return (
-    <div className="min-h-screen flex flex-col pg-aurora-bg text-stone-900">
+  return { key: 'workspace', node: (
+    <div className="min-h-screen flex flex-col pg-workspace pg-grain relative text-stone-900">
+      <Backdrop variant="workspace" />
       <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[70] focus:px-4 focus:py-2 focus:bg-white focus:rounded-xl focus:shadow-lg focus:text-sm focus:font-semibold">
         Skip to content
       </a>
@@ -1493,7 +1499,7 @@ export default function App() {
       <header className="sm:sticky sm:top-0 z-30 bg-white/90 backdrop-blur-md border-b border-stone-200/80 px-4 sm:px-6 lg:px-10 py-3 sm:py-4 flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
         {/* Zone 1: Brand Wordmark + Switch to Landing / AI Intake */}
         <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2 min-w-0">
-          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-[#B88B4A] via-[#C86D51] to-[#4A6B53] flex items-center justify-center text-white shadow-xs">
+          <div className="w-8 h-8 rounded-xl bg-[#2c4636] flex items-center justify-center text-[#e7c27b] shadow-xs">
             <Sparkles className="w-4 h-4" />
           </div>
           <a
@@ -1502,7 +1508,7 @@ export default function App() {
               e.preventDefault();
               setEntryMode('landing');
             }}
-            className="text-xl font-bold tracking-tight bg-gradient-to-r from-[#8C6226] via-[#B88B4A] to-[#4A6B53] bg-clip-text text-transparent whitespace-nowrap"
+            className="font-display text-2xl font-semibold tracking-tight text-stone-900 whitespace-nowrap"
           >
             PlanGenie
           </a>
@@ -1747,134 +1753,64 @@ export default function App() {
             </div>
           </div>
 
-          {/* DYNAMIC EVENT-SPECIFIC CUSTOM TABS BAR (Improvised per Event Type & Location!) */}
-          <div className="pt-3 border-t border-stone-100 flex items-center gap-2 overflow-x-auto pb-1">
+          {/* EVENT TABS: one shared pill glides between tabs (layout animation) */}
+          <div className="pt-3 border-t border-stone-100 flex items-center gap-1.5 overflow-x-auto pb-1" role="tablist" aria-label="Event sections">
             <span className="text-[11px] font-semibold uppercase tracking-wider text-stone-400 shrink-0 mr-1">
               Event Tabs:
             </span>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab('overview')}
-              className={`px-3.5 py-1.5 text-xs font-semibold rounded-xl transition-colors whitespace-nowrap shrink-0 ${
-                activeTab === 'overview'
-                  ? 'bg-stone-900 text-white'
-                  : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
-              }`}
-            >
-              Overview
-            </button>
-
-            {/* Dynamically Improvised Custom Category Tabs for this Event (e.g., Funeral Speaking Order, Pallbearers, 5-Day Indian Wedding) */}
-            {eventCustomModules.map((mod) => {
-              const isSelectedCustomTab =
-                activeTab === 'custom_hotels' &&
-                (focusedCustomModuleId === mod.id ||
-                  (!focusedCustomModuleId && eventCustomModules[0]?.id === mod.id));
-              return (
-                <button
-                  key={mod.id}
-                  type="button"
-                  onClick={() => {
-                    setFocusedCustomModuleId(mod.id);
-                    setActiveTab('custom_hotels');
-                  }}
-                  className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-xl transition-colors whitespace-nowrap shrink-0 ${
-                    isSelectedCustomTab
-                      ? 'bg-indigo-600 text-white shadow-2xs'
-                      : 'bg-indigo-50/90 text-indigo-800 hover:bg-indigo-100 border border-indigo-200/60'
-                  }`}
-                >
-                  <Sparkles className="w-3 h-3 shrink-0" />
-                  {mod.category_title}
-                </button>
-              );
-            })}
-
-            <button
-              type="button"
-              onClick={() => {
-                setActiveTab('custom_hotels');
-              }}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-xl bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-200/60 transition-colors whitespace-nowrap shrink-0"
-            >
-              <Building2 className="w-3.5 h-3.5 shrink-0" />
-              Nearby Hotels ({eventHotelBlocks.length})
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab('timeline')}
-              className={`px-3.5 py-1.5 text-xs font-semibold rounded-xl transition-colors whitespace-nowrap shrink-0 ${
-                activeTab === 'timeline'
-                  ? 'bg-stone-900 text-white'
-                  : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
-              }`}
-            >
-              Schedule ({completedTasksCount}/{cpmResult.tasks.length})
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab('budget')}
-              className={`px-3.5 py-1.5 text-xs font-semibold rounded-xl transition-colors whitespace-nowrap shrink-0 ${
-                activeTab === 'budget' || activeTab === 'forecasting'
-                  ? 'bg-stone-900 text-white'
-                  : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
-              }`}
-            >
-              Budget &amp; Forecast
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab('theme_rsvps')}
-              className={`px-3.5 py-1.5 text-xs font-semibold rounded-xl transition-colors whitespace-nowrap shrink-0 ${
-                activeTab === 'theme_rsvps'
-                  ? 'bg-stone-900 text-white'
-                  : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
-              }`}
-            >
-              Guests &amp; Google RSVP ({eventRsvps.length})
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab('vendors')}
-              className={`px-3.5 py-1.5 text-xs font-semibold rounded-xl transition-colors whitespace-nowrap shrink-0 ${
-                activeTab === 'vendors'
-                  ? 'bg-stone-900 text-white'
-                  : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
-              }`}
-            >
-              Vendors ({eventVendors.length})
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab('checklist')}
-              className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-xl transition-colors whitespace-nowrap shrink-0 ${
-                activeTab === 'checklist'
-                  ? 'bg-stone-900 text-white'
-                  : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
-              }`}
-            >
-              <ClipboardCheck className="w-3.5 h-3.5" />
-              Vendor Checklist
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab('ideas')}
-              className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-xl transition-colors whitespace-nowrap shrink-0 ${
-                activeTab === 'ideas'
-                  ? 'bg-stone-900 text-white'
-                  : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
-              }`}
-            >
-              <Lightbulb className="w-3.5 h-3.5" />
-              Idea Studio
-            </button>
+            {[
+              { key: 'overview', label: 'Overview', active: activeTab === 'overview', onClick: () => setActiveTab('overview') },
+              ...eventCustomModules.map((mod) => ({
+                key: `mod:${mod.id}`,
+                label: mod.category_title,
+                icon: <Sparkles className="w-3 h-3 shrink-0" />,
+                tint: 'bg-indigo-50/90 text-indigo-800 border border-indigo-200/60',
+                active:
+                  activeTab === 'custom_hotels' &&
+                  (focusedCustomModuleId === mod.id || (!focusedCustomModuleId && eventCustomModules[0]?.id === mod.id)),
+                onClick: () => {
+                  setFocusedCustomModuleId(mod.id);
+                  setActiveTab('custom_hotels');
+                },
+              })),
+              {
+                key: 'hotels',
+                label: `Nearby Hotels (${eventHotelBlocks.length})`,
+                icon: <Building2 className="w-3.5 h-3.5 shrink-0" />,
+                tint: 'bg-emerald-50 text-emerald-800 border border-emerald-200/60',
+                active: false,
+                onClick: () => setActiveTab('custom_hotels'),
+              },
+              { key: 'timeline', label: `Schedule (${completedTasksCount}/${cpmResult.tasks.length})`, active: activeTab === 'timeline', onClick: () => setActiveTab('timeline') },
+              { key: 'budget', label: 'Budget & Forecast', active: activeTab === 'budget' || activeTab === 'forecasting', onClick: () => setActiveTab('budget') },
+              { key: 'theme_rsvps', label: `Guests & Google RSVP (${eventRsvps.length})`, active: activeTab === 'theme_rsvps', onClick: () => setActiveTab('theme_rsvps') },
+              { key: 'vendors', label: `Vendors (${eventVendors.length})`, active: activeTab === 'vendors', onClick: () => setActiveTab('vendors') },
+              { key: 'checklist', label: 'Vendor Checklist', icon: <ClipboardCheck className="w-3.5 h-3.5" />, active: activeTab === 'checklist', onClick: () => setActiveTab('checklist') },
+              { key: 'ideas', label: 'Idea Studio', icon: <Lightbulb className="w-3.5 h-3.5" />, active: activeTab === 'ideas', onClick: () => setActiveTab('ideas') },
+            ].map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                role="tab"
+                aria-selected={t.active}
+                onClick={t.onClick}
+                className={`relative inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-xl whitespace-nowrap shrink-0 transition-colors ${
+                  t.active ? 'text-white' : (('tint' in t && t.tint) || 'bg-stone-100 text-stone-700') + ' hover:brightness-95'
+                }`}
+              >
+                {t.active && (
+                  <motion.span
+                    layoutId="ws-tab-pill"
+                    className="absolute inset-0 rounded-xl" style={{ background: 'var(--forest)', boxShadow: '0 6px 18px -8px rgba(44,70,54,.7)' }}
+                    transition={{ type: 'spring', stiffness: 420, damping: 34 }}
+                  />
+                )}
+                <span className="relative z-10 inline-flex items-center gap-1.5">
+                  {'icon' in t && t.icon}
+                  {t.label}
+                </span>
+              </button>
+            ))}
           </div>
         </div>
       </div>
@@ -1898,9 +1834,17 @@ export default function App() {
             offerDataReset
             onResetData={handleResetWorkspace}
           >
+          <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={`${activeTab === 'forecasting' ? 'budget' : activeTab}:${currentEvent.id}`}
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.32, ease: [0.2, 0.7, 0.2, 1] }}
+          >
           {/* VIEW 1: CLEAN BENTO BOX DASHBOARD GRID */}
           {activeTab === 'overview' && (
-            <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-stretch">
+            <div className="pg-stagger grid grid-cols-1 md:grid-cols-12 gap-6 items-stretch">
               <div className="md:col-span-12">
                 <GettingStartedCard
                   steps={[
@@ -2088,9 +2032,7 @@ export default function App() {
                         Budget Overview
                       </span>
                       <h2 className="text-2xl font-bold text-stone-900 font-mono tabular-nums mt-1">
-                        ${budgetResult.totalProjectedSpend.toLocaleString('en-US', {
-                          maximumFractionDigits: 0,
-                        })}
+                        <CountUp value={budgetResult.totalProjectedSpend} prefix="$" duration={1.2} />
                       </h2>
                       <p className="text-xs text-stone-500 mt-0.5">
                         of ${currentEvent.target_budget.toLocaleString()} target budget
@@ -2236,7 +2178,7 @@ export default function App() {
                         Guests &amp; Google Calendar RSVP
                       </span>
                       <h2 className="text-2xl font-bold text-stone-900 font-mono tabular-nums mt-1">
-                        {confirmedRsvpGuests}{' '}
+                        <CountUp value={confirmedRsvpGuests} duration={1} />{' '}
                         <span className="text-sm font-sans font-normal text-stone-500">
                           / {currentEvent.guest_count} guests
                         </span>
@@ -2452,6 +2394,8 @@ export default function App() {
               onOpenSecurityModal={() => setIsSecurityModalOpen(true)}
             />
           )}
+          </motion.div>
+          </AnimatePresence>
           </ErrorBoundary>
         </main>
 
@@ -2481,7 +2425,7 @@ export default function App() {
       <footer className="bg-white border-t border-stone-200/80 px-6 lg:px-10 py-5 mt-12">
         <div className="max-w-[1440px] mx-auto flex flex-wrap items-center justify-between gap-4 text-xs text-stone-500">
           <div>PlanGenie — Smart Event Planning, Custom Cultural Tabs &amp; Nearby Hotels</div>
-          <div className="flex items-center gap-6">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
             <button
               onClick={() => setActiveTab('architecture')}
               className="hover:text-stone-900 transition-colors"
@@ -2805,5 +2749,23 @@ export default function App() {
       )}
       {aiOverlays(false)}
     </div>
+  ) };
+  };
+
+  const screen = renderScreen();
+  return (
+    <MotionConfig reducedMotion="user">
+      <AnimatePresence mode="wait" initial={false}>
+        <motion.div
+          key={screen.key}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1, transition: { duration: 0.5, delay: 0.12 } }}
+          exit={{ opacity: 0, transition: { duration: 0.42 } }}
+        >
+          {screen.node}
+        </motion.div>
+      </AnimatePresence>
+      <PageCurtain trigger={screen.key} />
+    </MotionConfig>
   );
 }
