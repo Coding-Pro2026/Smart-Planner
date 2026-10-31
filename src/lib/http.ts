@@ -40,20 +40,34 @@ interface Opts<S extends z.ZodType | undefined> {
   raw?: boolean;
 }
 
-function assertSameOrigin(req: NextRequest) {
-  if (["GET", "HEAD", "OPTIONS"].includes(req.method)) return;
-  if (req.headers.get("sec-fetch-site") === "cross-site") throw new HttpError(403, "Cross-site request blocked");
-  const origin = req.headers.get("origin");
-  if (origin) {
-    const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
-    let originHost = "";
-    try {
-      originHost = new URL(origin).host;
-    } catch {
-      /* fallthrough */
-    }
-    if (!host || originHost !== host) throw new HttpError(403, "Cross-origin request blocked");
+/**
+ * CSRF defence for state-changing requests (on top of SameSite=Lax cookies).
+ *  1. Sec-Fetch-Site is set by the browser and cannot be forged by page scripts: `same-origin` is trusted
+ *     even behind a port-forwarding proxy that rewrites Host; `cross-site` is rejected.
+ *  2. Otherwise the Origin must match the Host / X-Forwarded-Host the server saw, or appear in ALLOWED_ORIGINS.
+ *  3. No Origin header at all means a non-browser client (curl, server-to-server); those carry no ambient cookies.
+ */
+export function isAllowedRequestOrigin(h: Pick<Headers, "get">, method: string, allowed = process.env.ALLOWED_ORIGINS ?? ""): boolean {
+  if (["GET", "HEAD", "OPTIONS"].includes(method)) return true;
+  const origin = h.get("origin");
+  const allowList = allowed.split(",").map((o) => o.trim().replace(/\/$/, "")).filter(Boolean);
+  if (origin && allowList.includes(origin.replace(/\/$/, ""))) return true;
+  const site = h.get("sec-fetch-site");
+  if (site === "cross-site") return false;
+  if (site === "same-origin") return true;
+  if (!origin) return true;
+  let originHost = "";
+  try {
+    originHost = new URL(origin).host;
+  } catch {
+    return false;
   }
+  const hosts = [h.get("host"), ...(h.get("x-forwarded-host") ?? "").split(",")].map((x) => x?.trim()).filter(Boolean);
+  return hosts.includes(originHost);
+}
+
+function assertSameOrigin(req: NextRequest) {
+  if (!isAllowedRequestOrigin(req.headers, req.method)) throw new HttpError(403, "Cross-origin request blocked");
 }
 
 export async function currentUser() {
