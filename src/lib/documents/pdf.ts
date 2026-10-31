@@ -12,9 +12,9 @@ const MAX_PAGES = 40;
 export async function extractPdfText(bytes: Uint8Array): Promise<string> {
   if (bytes.length === 0) throw new HttpError(400, "Empty file");
   if (bytes.length > MAX_PDF_BYTES) throw new HttpError(413, "PDF is larger than 10 MB");
-  // %PDF- magic bytes within the first 1024 bytes (spec allows leading junk) — don't trust the filename or MIME.
-  const head = Buffer.from(bytes.subarray(0, 1024)).toString("latin1");
-  if (!head.includes("%PDF-")) throw new HttpError(400, "That file is not a PDF");
+  // %PDF- magic bytes at the start of the file — don't trust the filename or MIME.
+  const head = Buffer.from(bytes.subarray(0, 16)).toString("latin1");
+  if (!/^(?:\xEF\xBB\xBF)?\s{0,4}%PDF-/.test(head)) throw new HttpError(400, "That file is not a PDF");
   let pdf;
   try {
     pdf = await getDocumentProxy(new Uint8Array(bytes));

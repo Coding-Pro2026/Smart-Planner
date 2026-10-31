@@ -21,6 +21,9 @@ export default function VendorsPage() {
   const cur = ev?.currency ?? "USD";
   const q = useQuery({ queryKey: ["vendors", eventId], queryFn: () => api<{ vendors: Vendor[] }>(`/events/${eventId}/vendors`) });
   const refresh = () => qc.invalidateQueries({ queryKey: ["vendors", eventId] });
+  // "In budget" is derived from the saved budget (survives reloads and other collaborators' actions).
+  const budget = useQuery({ queryKey: ["budget", eventId], queryFn: () => api<{ items: { vendorId: string | null }[] }>(`/events/${eventId}/budget`) });
+  const inBudget = new Set((budget.data?.items ?? []).map((i) => i.vendorId).filter(Boolean));
   const fileRef = useRef<HTMLInputElement>(null);
   const [meta, setMeta] = useState({ name: "", serviceType: "" });
   const [picked, setPicked] = useState<string[]>([]);
@@ -89,7 +92,9 @@ export default function VendorsPage() {
               {v.parsedTerms?.computed?.warnings.map((w) => <p key={w} className="text-xs text-warn">{w}</p>)}
               <div className="flex items-center justify-between">
                 <select disabled={!canEdit} className="py-1 text-xs" value={v.status} onChange={(e) => patch.mutate({ id: v.id, status: e.target.value })}>{["researching", "quoted", "booked", "rejected"].map((s) => <option key={s}>{s}</option>)}</select>
-                {canEdit && v.quoteAmount != null && <Button variant="outline" size="sm" loading={toBudget.isPending && toBudget.variables === v.id} onClick={() => toBudget.mutate(v.id)}>{toBudget.isSuccess && toBudget.variables === v.id ? "Added ✓" : "Add to budget"}</Button>}
+                {canEdit && v.quoteAmount != null && v.status !== "rejected" && (inBudget.has(v.id)
+                  ? <Badge tone="ok">In budget ✓</Badge>
+                  : <Button variant="outline" size="sm" loading={toBudget.isPending && toBudget.variables === v.id} onClick={() => toBudget.mutate(v.id)}>Add to budget</Button>)}
                 {canEdit && <Button variant="ghost" size="sm" onClick={() => del.mutate(v.id)} aria-label={`Delete ${v.name}`}><Trash2 className="h-4 w-4" /></Button>}
               </div>
             </Card>

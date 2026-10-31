@@ -38,11 +38,16 @@ export const POST = api({ raw: true, rate: { name: "quote-upload", limit: 10, wi
 
   // PDFs are parsed locally; photos / screenshots / scans of a quote go to the vision model instead.
   const bytes = new Uint8Array(await file.arrayBuffer());
-  const isPdf = Buffer.from(bytes.subarray(0, 1024)).toString("latin1").includes("%PDF-");
+  // Header must be at the very start (a UTF-8 BOM / whitespace is tolerated) — not anywhere in the first KB.
+  const isPdf = /^(?:\xEF\xBB\xBF)?\s{0,4}%PDF-/.test(Buffer.from(bytes.subarray(0, 16)).toString("latin1"));
   let image: ReturnType<typeof validateImage> | null = null;
   if (!isPdf) {
+    if (bytes.length > 5 * 1024 * 1024) throw new HttpError(413, "Images must be under 5 MB (PDFs may be up to 10 MB)");
     try { image = validateImage({ mime: "image/png", base64: Buffer.from(bytes).toString("base64") }); }
-    catch { throw new HttpError(400, "That file is not a PDF or a supported image (PNG, JPEG, WebP)"); }
+    catch (e) {
+      if (e instanceof HttpError && e.status === 413) throw e;
+      throw new HttpError(400, "That file is not a PDF or a supported image (PNG, JPEG, WebP)");
+    }
   }
   const doc = isPdf ? sanitizeUntrusted(await extractPdfText(bytes), 24_000) : { text: "", truncated: false, flags: [] as string[] };
   const terms = await generateStructured(llm, {

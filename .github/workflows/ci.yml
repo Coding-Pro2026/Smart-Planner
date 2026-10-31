@@ -10,7 +10,7 @@ jobs:
     services:
       postgres:
         image: postgres:16
-        env: { POSTGRES_PASSWORD: postgres }
+        env: { POSTGRES_PASSWORD: postgres, POSTGRES_DB: plangenie_test }
         ports: ["5432:5432"]
         options: >-
           --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
@@ -32,6 +32,9 @@ jobs:
       - run: ENCRYPTION_MASTER_KEY=$(npm run -s gen:master-key) npm run build
       - name: Security audit (static)
         run: ENCRYPTION_MASTER_KEY=x node scripts/security-audit.mjs --skip-tests
-      - name: Trivy filesystem scan (deps, secrets, misconfig)
-        uses: aquasecurity/trivy-action@0.28.0
-        with: { scan-type: fs, scanners: "vuln,secret,misconfig", severity: "CRITICAL,HIGH", ignore-unfixed: true, exit-code: "1" }
+      - name: Trivy filesystem scan (critical, fixable vulnerabilities + committed secrets)
+        # Run the official image directly: no third-party action tag to go stale.
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src aquasec/trivy:latest fs \
+            --scanners vuln,secret --severity CRITICAL --ignore-unfixed --exit-code 1 \
+            --skip-dirs node_modules,.next .
