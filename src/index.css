@@ -1,0 +1,201 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  :root {
+    --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    transition: background-color 0.25s ease, color 0.25s ease;
+  }
+
+  .font-mono, .tabular-nums {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* Warm Champagne Cream, Honey Gold & Botanical Sage Canvas (Zero Purple) */
+.pg-aurora-bg {
+  background-color: #f9f5eb;
+  background-image:
+    radial-gradient(at 10% 10%, rgba(184, 139, 74, 0.14) 0px, transparent 48%),
+    radial-gradient(at 88% 12%, rgba(74, 107, 83, 0.12) 0px, transparent 46%),
+    radial-gradient(at 50% 50%, rgba(200, 109, 81, 0.08) 0px, transparent 52%),
+    radial-gradient(at 15% 88%, rgba(74, 107, 83, 0.10) 0px, transparent 48%),
+    radial-gradient(at 85% 85%, rgba(184, 139, 74, 0.12) 0px, transparent 50%);
+  background-attachment: fixed;
+}
+
+.dark .pg-aurora-bg {
+  background-color: #12110e;
+  background-image:
+    radial-gradient(at 10% 12%, rgba(184, 139, 74, 0.18) 0px, transparent 50%),
+    radial-gradient(at 88% 14%, rgba(74, 107, 83, 0.18) 0px, transparent 46%),
+    radial-gradient(at 50% 50%, rgba(200, 109, 81, 0.10) 0px, transparent 55%),
+    radial-gradient(at 15% 88%, rgba(74, 107, 83, 0.14) 0px, transparent 48%),
+    radial-gradient(at 85% 85%, rgba(184, 139, 74, 0.16) 0px, transparent 50%);
+  background-attachment: fixed;
+}
+
+/* Global Remap of any legacy Indigo/Purple/Violet utilities to Warm Gold & Botanical Sage (Zero Purple Rule) */
+.bg-indigo-600,
+.hover\:bg-indigo-700:hover {
+  background-color: #4a6b53 !important;
+}
+.bg-indigo-50,
+.bg-indigo-50\/80,
+.bg-indigo-50\/90,
+.bg-indigo-50\/40 {
+  background-color: #eef4ef !important;
+}
+.hover\:bg-indigo-100:hover {
+  background-color: #dfece2 !important;
+}
+.text-indigo-600,
+.text-indigo-700,
+.text-indigo-800,
+.text-indigo-900 {
+  color: #3b5943 !important;
+}
+.border-indigo-600,
+.border-indigo-500,
+.border-indigo-200,
+.border-indigo-200\/60,
+.border-indigo-200\/70,
+.border-indigo-100 {
+  border-color: #b7d0be !important;
+}
+
+/* Comprehensive Dark Mode Surface & Typography Adaptation across all Views */
+.dark {
+  color-scheme: dark;
+}
+
+.dark .bg-white,
+.dark .bg-white\/95,
+.dark .bg-white\/90 {
+  background-color: rgba(28, 25, 23, 0.90) !important;
+  backdrop-filter: blur(16px);
+}
+
+.dark .bg-stone-50,
+.dark .bg-stone-50\/80,
+.dark .bg-stone-50\/90,
+.dark .bg-stone-50\/70,
+.dark .bg-stone-50\/60,
+.dark .bg-stone-50\/50 {
+  background-color: rgba(23, 21, 19, 0.82) !important;
+}
+
+.dark .bg-stone-100,
+.dark .bg-stone-100\/80,
+.dark .bg-stone-100\/90 {
+  background-color: rgba(41, 37, 36, 0.88) !important;
+}
+
+.dark .hover\:bg-stone-100:hover,
+.dark .hover\:bg-stone-200:hover,
+.dark .hover\:bg-stone-50:hover {
+  background-color: rgba(68, 64, 60, 0.85) !important;
+}
+
+.dark .text-stone-900,
+.dark .text-stone-800 {
+  color: #fafaf9 !important;
+}
+
+.dark .text-stone-700,
+.dark .text-stone-600 {
+  color: #d6d3d1 !important;
+}
+
+.dark .text-stone-500,
+.dark .text-stone-400 {
+  color: #a8a29e !important;
+}
+
+.dark .border-stone-200,
+.dark .border-stone-200\/80,
+.dark .border-stone-200\/90,
+.dark .border-stone-200\/70,
+.dark .border-stone-300,
+.dark .border-stone-100 {
+  border-color: rgba(168, 162, 158, 0.18) !important;
+}
+
+.dark .divide-stone-100 > :not([hidden]) ~ :not([hidden]),
+.dark .divide-stone-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: rgba(168, 162, 158, 0.14) !important;
+}
+
+/* Warm Sage & Gold Surfaces in Dark Mode */
+.dark .bg-indigo-50,
+.dark .bg-indigo-50\/80,
+.dark .bg-indigo-50\/90,
+.dark .bg-indigo-50\/40,
+.dark .bg-emerald-50,
+.dark .bg-emerald-50\/60,
+.dark .bg-emerald-50\/40 {
+  background-color: rgba(74, 107, 83, 0.22) !important;
+}
+
+.dark .text-indigo-900,
+.dark .text-indigo-800,
+.dark .text-indigo-700,
+.dark .text-indigo-600,
+.dark .text-emerald-900,
+.dark .text-emerald-800,
+.dark .text-emerald-700 {
+  color: #86efac !important;
+}
+
+.dark .border-indigo-100,
+.dark .border-indigo-200,
+.dark .border-indigo-200\/60,
+.dark .border-indigo-200\/70,
+.dark .border-emerald-200,
+.dark .border-emerald-200\/60,
+.dark .border-emerald-200\/80 {
+  border-color: rgba(134, 239, 172, 0.28) !important;
+}
+
+.dark .bg-amber-50,
+.dark .bg-amber-50\/70 {
+  background-color: rgba(184, 139, 74, 0.20) !important;
+}
+
+.dark .text-amber-900,
+.dark .text-amber-800,
+.dark .text-amber-700 {
+  color: #fcd34d !important;
+}
+
+.dark .bg-rose-50,
+.dark .bg-rose-50\/70 {
+  background-color: rgba(200, 109, 81, 0.18) !important;
+}
+
+.dark .text-rose-800,
+.dark .text-rose-700,
+.dark .text-rose-600 {
+  color: #fdba74 !important;
+}
+
+/* Inputs, Selects & Textareas in Dark Mode */
+.dark input,
+.dark select,
+.dark textarea {
+  background-color: rgba(28, 25, 23, 0.92) !important;
+  color: #fafaf9 !important;
+  border-color: rgba(168, 162, 158, 0.25) !important;
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: #78716c !important;
+}

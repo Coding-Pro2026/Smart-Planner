@@ -1,0 +1,6 @@
+{
+  "name": "PlanGenie — Enterprise AI Event Planning & CPM Suite",
+  "description": "Multi-agent event planning platform for weddings, milestone birthdays, and community events featuring deterministic budget engines, Critical Path Method (CPM) DAG scheduling, vendor quote parsing, and mood board analysis.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
