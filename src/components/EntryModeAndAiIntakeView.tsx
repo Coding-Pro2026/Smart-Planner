@@ -1,4 +1,5 @@
 import { postJson } from '../lib/api';
+import { Backdrop } from './design/Backdrop';
 import { parseIntake } from '../lib/intakeParser';
 import React, { useEffect, useState } from 'react';
 import {
@@ -222,7 +223,8 @@ export const EntryModeAndAiIntakeView: React.FC<EntryModeAndAiIntakeViewProps> =
   // MODE 1: START SCREEN CHOOSER ("Plan with AI" vs "Plan Without AI")
   if (mode === 'chooser') {
     return (
-      <div className="min-h-screen pg-aurora-bg text-stone-900 flex flex-col justify-between">
+      <div className="min-h-screen pg-grain relative text-stone-900 flex flex-col justify-between">
+        <Backdrop variant="workspace" />
         {/* Clean Warm Header with Light/Dark Mode Toggle */}
         <header className="bg-[#FAF6EC]/95 backdrop-blur-md border-b border-stone-200/80 px-4 sm:px-6 lg:px-10 py-3 sm:py-4 flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-3">
@@ -243,7 +245,7 @@ export const EntryModeAndAiIntakeView: React.FC<EntryModeAndAiIntakeViewProps> =
               </span>
               <span className="hidden sm:inline-block text-xs text-stone-400 mx-2">·</span>
               <span className="hidden sm:inline-block text-xs font-medium text-stone-600">
-                Agentic Event Architecture, Nearby Hotels &amp; Cultural Workflows
+                Event planning, arranged
               </span>
             </div>
           </div>
@@ -289,7 +291,7 @@ export const EntryModeAndAiIntakeView: React.FC<EntryModeAndAiIntakeViewProps> =
             </h1>
             <p className="text-sm sm:text-base text-stone-600 leading-relaxed">
               Start in our conversational AI architect that dynamically improvises custom tabs
-              for your event type and region, or enter the Bento Box workspace directly.
+              for your event type and region, or open the workspace directly.
             </p>
           </div>
 
@@ -331,7 +333,7 @@ export const EntryModeAndAiIntakeView: React.FC<EntryModeAndAiIntakeViewProps> =
                   <div className="flex items-start gap-2.5">
                     <CheckCircle2 className="w-4 h-4 text-[#4A6B53] shrink-0 mt-0.5" />
                     <span>
-                      <strong>Fetches Cheap Nearby Hotels Online:</strong> Finds affordable
+                      <strong>Finds Nearby Hotels:</strong> Finds affordable
                       hotels near your venue and sets up room blocks.
                     </span>
                   </div>
@@ -371,7 +373,7 @@ export const EntryModeAndAiIntakeView: React.FC<EntryModeAndAiIntakeViewProps> =
                     Plan Without AI (Direct Workspace)
                   </h2>
                   <p className="text-sm text-stone-600 leading-relaxed">
-                    Go straight into the Bento Box planning dashboard to manage schedules,
+                    Go straight into the planning dashboard to manage schedules,
                     budgets, Google Calendar RSVPs, hotel blocks, and custom tabs manually.
                   </p>
                 </div>
@@ -437,7 +439,8 @@ export const EntryModeAndAiIntakeView: React.FC<EntryModeAndAiIntakeViewProps> =
 
   // MODE 2: STANDARD CHAT INTERFACE ("Plan with AI")
   return (
-    <div className="min-h-screen pg-aurora-bg text-stone-900 flex flex-col">
+    <div className="min-h-screen pg-grain relative text-stone-900 flex flex-col">
+      <Backdrop variant="workspace" />
       {/* Top Bar */}
       <header className="bg-[#FAF6EC]/95 backdrop-blur-md border-b border-stone-200/80 px-4 sm:px-6 lg:px-10 py-3 sm:py-4 flex flex-wrap items-center justify-between gap-2 sm:gap-4">
         <div className="flex items-center gap-4">
