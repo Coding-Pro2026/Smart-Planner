@@ -74,7 +74,7 @@ const PRODUCT_VIDEO_CHAPTERS: VideoChapter[] = [
       generatedTabs: [
         'Tab 1: Eulogy & Speaking Order (Who Speaks First)',
         'Tab 2: Pallbearers & Processional Protocol',
-        'Tab 3: Bereavement Repast & Cheap Nearby Hotels',
+        'Tab 3: Bereavement Repast & Nearby Hotels',
       ],
       liveMetricLabel: 'Custom Tabs Improvised',
       liveMetricValue: '3 Bespoke Modules + 9 Tasks',
@@ -100,9 +100,9 @@ const PRODUCT_VIDEO_CHAPTERS: VideoChapter[] = [
   {
     id: 'chap_hotels_india',
     number: '02',
-    title: '5-Day Cultural Rituals & Live Cheap Nearby Hotels',
+    title: '5-Day Cultural Rituals & Nearby Hotels',
     subtitle:
-      'See how multi-day regional events automatically generate Haldi, Mehendi, Sangeet & Baraat tabs while fetching cheap nearby hotel room blocks online.',
+      'See how multi-day regional events automatically generate Haldi, Mehendi, Sangeet & Baraat tabs while finding real nearby hotels (OpenStreetMap) for room blocks.',
     durationSec: 12,
     videoUrl:
       'https://assets.mixkit.co/videos/preview/mixkit-people-toasting-with-champagne-at-a-party-42653-large.mp4',
@@ -116,7 +116,7 @@ const PRODUCT_VIDEO_CHAPTERS: VideoChapter[] = [
       generatedTabs: [
         'Tab 1: 5-Day Ceremony Schedule (Haldi, Mehendi, Sangeet, Baraat)',
         'Tab 2: Sangeet Dance & Family Toast Order',
-        'Tab 3: Live Cheap Nearby Hotels ($54/nt–$112/nt)',
+        'Tab 3: Nearby Hotels & Room-Block Inquiries',
       ],
       liveMetricLabel: 'Lowest Nearby Hotel Found',
       liveMetricValue: '$54/nt (Save 31% Group Block)',
@@ -144,7 +144,7 @@ const PRODUCT_VIDEO_CHAPTERS: VideoChapter[] = [
     number: '03',
     title: 'Google Calendar Email RSVPs & Smart Cost Forecasting',
     subtitle:
-      'Dispatch real Google Calendar email invites (sendUpdates=all) and forecast multi-year vendor inflation using Ordinary Least Squares regression.',
+      'Add events and guests to Google Calendar in one click (no account linking) and forecast multi-year vendor inflation using Ordinary Least Squares regression.',
     durationSec: 12,
     videoUrl:
       'https://assets.mixkit.co/videos/preview/mixkit-hands-of-a-woman-working-on-a-laptop-41645-large.mp4',
@@ -245,7 +245,7 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
   return (
     <div className="min-h-screen pg-aurora-bg text-stone-900 flex flex-col selection:bg-[#B88B4A] selection:text-white">
       {/* STRICT 3-ZONE TOP NAVIGATION BAR (Warm Cream, Honey Gold & Botanical Sage — Zero Purple) */}
-      <header className="sticky top-0 z-40 bg-[#FAF6EC]/95 dark:bg-stone-900/90 backdrop-blur-md border-b border-stone-200/80 px-6 lg:px-10 py-4 flex items-center justify-between gap-6">
+      <header className="sticky top-0 z-40 bg-[#FAF6EC]/95 dark:bg-stone-900/90 backdrop-blur-md border-b border-stone-200/80 px-4 sm:px-6 lg:px-10 py-3 sm:py-4 flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
         {/* Zone 1: Brand Wordmark */}
         <a
           href="#top"
@@ -331,7 +331,7 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
 
               <p className="text-base sm:text-lg text-stone-700 leading-relaxed">
                 Your AI-powered assistant for weddings, birthdays, memorials, and
-                community events — complete with custom regional tabs, live cheap nearby
+                community events — complete with custom regional tabs, nearby
                 hotels, and Google Calendar RSVPs.
               </p>
 
@@ -365,7 +365,7 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
                 </span>
                 <span className="inline-flex items-center gap-1.5">
                   <Check className="w-4 h-4 text-[#4A6B53]" />
-                  Live Cheap Hotel Blocks
+                  Nearby Hotel Blocks
                 </span>
               </div>
             </motion.div>
@@ -518,7 +518,7 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
                 Vendor &amp; Hotel Matchmaking
               </h2>
               <p className="text-xs text-stone-600 leading-relaxed">
-                Fetches cheap nearby hotels online sorted by price and audits vendor PDF
+                Finds real nearby hotels with live-rate links and audits vendor quote
                 contracts for hidden fees.
               </p>
             </motion.div>
@@ -912,9 +912,11 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
       <footer className="bg-[#FAF6EC]/90 dark:bg-stone-900/90 backdrop-blur-md border-t border-stone-200/80 px-6 lg:px-10 py-6 mt-auto">
         <div className="max-w-[1280px] mx-auto flex flex-wrap items-center justify-between gap-4 text-xs text-stone-600">
           <div className="font-semibold text-stone-900">
-            PlanGenie — Smart Event Planning, Custom Cultural Tabs, Live Hotel Deals &amp; Google Calendar RSVPs
+            PlanGenie — Smart Event Planning, Custom Cultural Tabs, Nearby Hotels &amp; Calendar Invites
           </div>
           <div className="flex items-center gap-6">
+            <a href="/privacy" className="hover:text-stone-900 transition-colors">Privacy</a>
+            <a href="/terms" className="hover:text-stone-900 transition-colors">Terms</a>
             <button
               type="button"
               onClick={() => onStartWithAiChat()}

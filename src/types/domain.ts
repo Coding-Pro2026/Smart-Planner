@@ -24,14 +24,6 @@ export type AgentName =
   | 'Logistics & Timeline Agent'
   | 'Vendor & Contract Agent';
 
-export interface ModelRoutingConfig {
-  fastTaskProfile: 'gemini-3.8-flash' | 'gemini-3.1-flash-lite';
-  reasoningVisionProfile: 'gemini-3.8-flash';
-  encryptionMode: 'session_memory' | 'aes_256_gcm_vault';
-  strictDeterministicMath: boolean;
-  autoCascadeDependencies: boolean;
-}
-
 export interface UserRecord {
   id: string;
   email: string;
@@ -222,7 +214,13 @@ export interface LiveNearbyHotelDeal {
   original_retail_price: number;
   savings_pct: number;
   star_rating: number;
-  tier_label: 'Best Budget Deal' | 'Mid-Range Value' | 'Group Block Favorite';
+  /** Informational label only; prices are 0 when unknown (open data has no rates). */
+  tier_label:
+    | 'Best Budget Deal'
+    | 'Mid-Range Value'
+    | 'Group Block Favorite'
+    | 'Nearby Hotel'
+    | 'Your Room Block';
   amenities: string[];
   booking_url: string;
   source_label: string;

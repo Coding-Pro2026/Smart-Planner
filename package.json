@@ -1,26 +1,26 @@
 {
-  "name": "react-example",
+  "name": "plangenie",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "start": "tsx server.ts",
-    "build": "vite build",
+    "start": "NODE_ENV=production node dist/server.mjs",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/server.mjs --log-level=warning",
     "preview": "vite preview",
-    "test": "tsx src/tests/runAuditSuite.ts",
-    "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit"
+    "test": "tsx src/tests/runAuditSuite.ts && tsx src/tests/runAiLayerTests.ts",
+    "clean": "rm -rf dist",
+    "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "verify": "tsc --noEmit && tsx src/tests/runAuditSuite.ts && npm run build"
   },
   "dependencies": {
-    "@google/genai": "^2.32.0",
     "@tailwindcss/vite": "^4.3.3",
     "@types/google.maps": "^3.66.9",
     "@vis.gl/react-google-maps": "^1.10.2",
     "@vitejs/plugin-react": "^6.1.1",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
-    "firebase": "^13.1.0",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "react": "^19.0.1",
@@ -38,5 +38,9 @@
     "tsx": "^4.21.0",
     "typescript": "^7.0.2",
     "@types/express": "^4.17.21"
+  },
+  "description": "GenAI-powered event planning assistant for weddings, birthdays and community events",
+  "engines": {
+    "node": ">=20.11"
   }
 }

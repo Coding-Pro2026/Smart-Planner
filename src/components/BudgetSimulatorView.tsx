@@ -75,7 +75,7 @@ export const BudgetSimulatorView: React.FC<BudgetSimulatorViewProps> = ({
       quantity: newIsPerGuest ? event.guest_count : quantity,
       tax_pct: Math.max(0, taxPct),
       contingency_pct: Math.max(0, contingencyPct),
-      actual_cost: unitCost * (newIsPerGuest ? event.guest_count : quantity),
+      actual_cost: 0, // nothing has been paid yet
       is_per_guest: newIsPerGuest,
       status: 'planned',
     });
@@ -104,7 +104,7 @@ export const BudgetSimulatorView: React.FC<BudgetSimulatorViewProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-1 p-1 bg-stone-200/70 rounded-xl">
+        <div className="flex flex-wrap items-center gap-1 p-1 bg-stone-200/70 rounded-xl max-w-full">
           <button
             type="button"
             onClick={() => setSubView('current')}
@@ -381,7 +381,7 @@ export const BudgetSimulatorView: React.FC<BudgetSimulatorViewProps> = ({
                 onSubmit={handleCreateItem}
                 className="p-6 bg-stone-50 border-b border-stone-200 space-y-4"
               >
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
                   <div className="lg:col-span-2">
                     <label className="block text-xs font-medium text-stone-700 mb-1">
                       Expense Name
@@ -417,6 +417,20 @@ export const BudgetSimulatorView: React.FC<BudgetSimulatorViewProps> = ({
                       value={newUnitCost}
                       onChange={(e) => setNewUnitCost(e.target.value)}
                       className="w-full px-3 py-2 text-xs font-mono bg-white border border-stone-300 rounded-lg"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-stone-700 mb-1">
+                      Quantity
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      step="1"
+                      value={newIsPerGuest ? event.guest_count : newQuantity}
+                      disabled={newIsPerGuest}
+                      onChange={(e) => setNewQuantity(e.target.value)}
+                      className="w-full px-3 py-2 text-xs font-mono bg-white border border-stone-300 rounded-lg disabled:opacity-60"
                     />
                   </div>
                   <div className="flex flex-col justify-end">

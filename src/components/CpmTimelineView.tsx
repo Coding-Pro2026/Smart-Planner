@@ -21,11 +21,11 @@ import { EventRecord, TaskRecord, TaskStatus } from '../types/domain';
 interface CpmTimelineViewProps {
   event: EventRecord;
   cpmResult: CpmScheduleResult;
-  onShiftTask: (taskId: string, deltaDays: number) => void;
+  onShiftTask: (taskId: string, deltaDays: number) => boolean | void;
   onToggleTaskStatus: (taskId: string, nextStatus: TaskStatus) => void;
   onAddTask: (
     task: Omit<TaskRecord, 'id' | 'event_id' | 'is_critical_path' | 'start_date' | 'due_date'>
-  ) => void;
+  ) => boolean | void;
 }
 
 export const CpmTimelineView: React.FC<CpmTimelineViewProps> = ({
@@ -52,7 +52,7 @@ export const CpmTimelineView: React.FC<CpmTimelineViewProps> = ({
   const totalSpan = Math.max(30, cpmResult.totalProjectDurationDays);
 
   const handleShiftWithFeedback = (task: TaskRecord, deltaDays: number) => {
-    onShiftTask(task.id, deltaDays);
+    if (onShiftTask(task.id, deltaDays) === false) return;
     const dependentCount = cpmResult.tasks.filter((t) =>
       t.dependencies.includes(task.id)
     ).length;
@@ -72,7 +72,7 @@ export const CpmTimelineView: React.FC<CpmTimelineViewProps> = ({
     e.preventDefault();
     if (!newTitle.trim()) return;
 
-    onAddTask({
+    const created = onAddTask({
       title: newTitle.trim(),
       category: newCategory.trim() || 'General',
       milestone_code: newMilestone,
@@ -84,6 +84,7 @@ export const CpmTimelineView: React.FC<CpmTimelineViewProps> = ({
       dependencies: selectedDep ? [selectedDep] : [],
     });
 
+    if (created === false) return; // App already explained why (e.g. circular dependency)
     setNewTitle('');
     setShowNewTaskForm(false);
     setCascadeBanner(`Scheduled new task "${newTitle.trim()}" and linked it to your timeline.`);

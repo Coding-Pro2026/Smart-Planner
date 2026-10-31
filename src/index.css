@@ -199,3 +199,43 @@
 .dark textarea::placeholder {
   color: #78716c !important;
 }
+
+
+/* Print / "Save as PDF": show only the active workspace view */
+@media print {
+  header,
+  aside,
+  footer,
+  nav,
+  button,
+  .pg-no-print {
+    display: none !important;
+  }
+  .pg-aurora-bg,
+  body {
+    background: #fff !important;
+  }
+  main {
+    max-width: 100% !important;
+  }
+  * {
+    box-shadow: none !important;
+  }
+}
+
+/* Respect users who prefer reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+:focus-visible {
+  outline: 2px solid #4a6b53;
+  outline-offset: 2px;
+}

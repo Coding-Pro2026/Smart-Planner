@@ -9,7 +9,8 @@ import {
   ShieldAlert,
   Upload,
 } from 'lucide-react';
-import { EventRecord, VendorRecord, VendorStatus } from '../types/domain';
+import { EventRecord, ParsedVendorTerms, VendorRecord, VendorStatus } from '../types/domain';
+import { postJson } from '../lib/api';
 
 interface VendorMatrixViewProps {
   event: EventRecord;
@@ -43,6 +44,7 @@ export const VendorMatrixView: React.FC<VendorMatrixViewProps> = ({
   const [filename, setFilename] = useState('Vendor_Proposal_2027.pdf');
   const [isParsing, setIsParsing] = useState(false);
   const [parseFeedback, setParseFeedback] = useState<string | null>(null);
+  const [parseFailed, setParseFailed] = useState(false);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -51,11 +53,23 @@ export const VendorMatrixView: React.FC<VendorMatrixViewProps> = ({
     if (!vendorName) {
       setVendorName(file.name.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' '));
     }
-    const text = await file.text();
-    setRawQuoteText(
-      text.slice(0, 6000) ||
-        `Uploaded file: ${file.name} (${file.size} bytes). Base Package: $9,400. Service fee 20%, Tax 8.5%. Non-refundable 50% retainer.`
-    );
+    const isTextLike =
+      file.type.startsWith('text/') || /\.(txt|md|csv|json|eml|rtf)$/i.test(file.name);
+    if (!isTextLike || file.size > 2_000_000) {
+      setParseFailed(true);
+      setParseFeedback(
+        'PDF and image quotes can’t be read in the browser — please open the document, copy the text and paste it into the box.'
+      );
+      return;
+    }
+    try {
+      const text = await file.text();
+      setRawQuoteText(text.slice(0, 20000));
+      setParseFeedback(null);
+    } catch {
+      setParseFailed(true);
+      setParseFeedback('That file could not be read. Try pasting the quote text instead.');
+    }
   };
 
   const handleLoadSampleQuote = () => {
@@ -71,47 +85,46 @@ export const VendorMatrixView: React.FC<VendorMatrixViewProps> = ({
 
     setIsParsing(true);
     setParseFeedback(null);
+    setParseFailed(false);
 
-    try {
-      const response = await fetch('/api/agents/parse-quote', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          vendorName: vendorName.trim() || 'Lumiere Botanicals',
-          serviceType: serviceType.trim() || 'Floral & Production',
-          rawQuoteText,
-          filename,
-        }),
-      });
-      const data = await response.json();
+    const res = await postJson<{
+      vendorName: string;
+      serviceType: string;
+      filename: string;
+      parsed_terms: ParsedVendorTerms;
+    }>('/api/agents/parse-quote', {
+      vendorName: vendorName.trim() || 'Prospective Vendor',
+      serviceType: serviceType.trim() || 'Event Services',
+      rawQuoteText,
+      filename,
+    });
+    setIsParsing(false);
 
-      if (data.parsed_terms) {
-        onAddParsedVendor({
-          name: data.vendorName,
-          service_type: data.serviceType,
-          quote_amount: data.parsed_terms.base_fee,
-          status: 'quoted',
-          contact_email: `contracts@${data.vendorName
-            .toLowerCase()
-            .replace(/[^a-z0-9]/g, '')
-            .slice(0, 14)}.com`,
-          contract_filename: data.filename,
-          parsed_terms: data.parsed_terms,
-        });
-        setParseFeedback(
-          `Analyzed ${data.vendorName}: Found ${
-            data.parsed_terms.hidden_fees_detected?.length ?? 0
-          } hidden fees. True total cost is $${data.parsed_terms.total_true_cost.toLocaleString()}.`
-        );
-        setRawQuoteText('');
-        setVendorName('');
-        setShowAnalyzerDrawer(false);
-      }
-    } catch {
-      setParseFeedback('Could not analyze quote. Please check the text and try again.');
-    } finally {
-      setIsParsing(false);
+    if (!res.ok || !res.data?.parsed_terms) {
+      setParseFailed(true);
+      setParseFeedback(res.ok ? 'The analyzer returned no result. Please try again.' : res.error);
+      return;
     }
+    const data = res.data;
+    const total = Number(data.parsed_terms.total_true_cost) || 0;
+    const name = String(data.vendorName || 'Prospective Vendor');
+    onAddParsedVendor({
+      name,
+      service_type: data.serviceType,
+      quote_amount: data.parsed_terms.base_fee,
+      status: 'quoted',
+      contact_email: `contracts@${name.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 14) || 'vendor'}.com`,
+      contract_filename: data.filename,
+      parsed_terms: data.parsed_terms,
+    });
+    setParseFeedback(
+      `Analyzed ${name}: found ${
+        data.parsed_terms.hidden_fees_detected?.length ?? 0
+      } hidden fee(s) and ${data.parsed_terms.risk_clauses?.length ?? 0} clause(s) to review. True total cost is $${total.toLocaleString()}.`
+    );
+    setRawQuoteText('');
+    setVendorName('');
+    setShowAnalyzerDrawer(false);
   };
 
   return (
@@ -136,9 +149,20 @@ export const VendorMatrixView: React.FC<VendorMatrixViewProps> = ({
       </div>
 
       {parseFeedback && (
-        <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 flex items-center justify-between text-xs font-medium">
+        <div
+          role={parseFailed ? 'alert' : 'status'}
+          className={`p-4 rounded-xl border flex items-center justify-between text-xs font-medium ${
+            parseFailed
+              ? 'bg-rose-50 border-rose-200 text-rose-900'
+              : 'bg-emerald-50 border-emerald-200 text-emerald-900'
+          }`}
+        >
           <span className="inline-flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            {parseFailed ? (
+              <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+            ) : (
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            )}
             {parseFeedback}
           </span>
           <button

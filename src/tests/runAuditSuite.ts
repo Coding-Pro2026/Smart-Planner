@@ -12,6 +12,19 @@ import {
 } from '../lib/deterministicEngine';
 import { SEED_BUDGET_ITEMS, SEED_EVENTS, getInitialTasks } from '../lib/seedData';
 import { BudgetItemRecord, TaskRecord } from '../types/domain';
+import { addDaysIso, diffDays, isValidIsoDate } from '../lib/dates';
+import { extractDate, parseIntake } from '../lib/intakeParser';
+import { parseQuoteText } from '../lib/quoteParser';
+import { buildIcs, csvCell } from '../lib/exporters';
+import { computeReadiness } from '../lib/insights';
+import { buildVendorChecklist } from '../lib/vendorChecklist';
+import { buildLocalAssistantReply } from '../lib/localAssistant';
+import { generateIdeas } from '../lib/ideas';
+import { generateMoodboard } from '../lib/moodboardGenerator';
+import { safeHttpUrl } from '../lib/url';
+import { buildGoogleCalendarTemplateUrl, isValidGoogleClientId } from '../lib/googleCalendarRsvp';
+import { isValidMapsKey, osmEmbedUrl } from '../lib/mapsConfig';
+import { haversineMiles } from '../server/geo';
 
 export interface SecurityAuditCheckResult {
   id: string;
@@ -21,7 +34,8 @@ export interface SecurityAuditCheckResult {
     | 'BYOK_AES256_CRYPTO'
     | 'PROMPT_INJECTION_SSRF'
     | 'TENANT_ISOLATION_RLS'
-    | 'SECRET_LEAK_GUARD';
+    | 'SECRET_LEAK_GUARD'
+    | 'FEATURE_LOGIC';
   title: string;
   passed: boolean;
   durationMs: number;
@@ -356,6 +370,159 @@ export function runAllVerificationSuites(): FullVerificationReport {
       return `Verified OLS Linear Regression (y = m·x + b) for Catering (+5.88%/yr, R²=0.9997) & Venue (+5.28%/yr, R²=0.9999) with 95% confidence intervals.`;
     }
   );
+
+  // 10. Date utilities
+  runCheck('chk_dates', 'FEATURE_LOGIC', 'Date Utilities: Leap-Year Math, Validation & Day Diffs', () => {
+    if (addDaysIso('2028-02-28', 1) !== '2028-02-29') throw new Error('Leap day not handled');
+    if (addDaysIso('2026-12-31', 1) !== '2027-01-01') throw new Error('Year rollover failed');
+    if (isValidIsoDate('2026-02-30')) throw new Error('Invalid calendar date accepted');
+    if (diffDays('2026-10-31', '2026-11-30') !== 30) throw new Error('diffDays wrong');
+    return 'Verified leap years, year rollover, calendar validation and day differences.';
+  });
+
+  // 11. Natural-language intake parser
+  runCheck('chk_intake_parser', 'FEATURE_LOGIC', 'Intake Parser: Type, Guests, Budget, Date & Location Extraction', () => {
+    const r = parseIntake(
+      'Plan a 3-day wedding in Austin for 180 guests with a $45k budget on March 20 2027',
+      {},
+      '2026-10-31'
+    );
+    if (r.event_type !== 'wedding' || r.guest_count !== 180 || r.target_budget !== 45000) {
+      throw new Error(`Parsed wrong fields: ${JSON.stringify(r)}`);
+    }
+    if (r.date !== '2027-03-20' || r.event_days !== 3) throw new Error('Date/days parse failed');
+    if (extractDate('on 5 March', '2026-10-31') !== '2027-03-05') throw new Error('Year-less date should roll forward');
+    return 'Extracted wedding / 180 guests / $45,000 / 2027-03-20 / 3 days from free text; year-less dates roll forward.';
+  });
+
+  // 12. Vendor quote parser
+  runCheck('chk_quote_parser', 'FEATURE_LOGIC', 'Quote Parser: Real Fees, True Cost & Risk Clauses From Pasted Text', () => {
+    const t = parseQuoteText(
+      'Venue package: $5,000\nService charge 20%\nGratuity 18%\nSales tax 8.5%\nCleaning fee $300\n50% deposit, non-refundable.'
+    );
+    if (t.base_fee !== 5000 || t.service_charge_pct !== 20 || t.gratuity_pct !== 18) {
+      throw new Error('Fee extraction wrong');
+    }
+    const expected = Math.round((5000 * 1.465 + 300) * 100) / 100;
+    if (t.total_true_cost !== expected) throw new Error(`True cost ${t.total_true_cost} != ${expected}`);
+    if (!t.risk_clauses.some((c) => /non-refundable/i.test(c.clause))) throw new Error('Missed non-refundable clause');
+    if (parseQuoteText('no prices here').base_fee !== 0) throw new Error('Should not invent a price');
+    return 'Computed $7,625 true cost from the pasted quote and flagged the non-refundable deposit; no prices => no invented numbers.';
+  });
+
+  // 13. Exports
+  runCheck('chk_exports', 'FEATURE_LOGIC', 'Exports: RFC-5545 ICS Folding/Escaping & CSV Formula-Injection Guard', () => {
+    const ev = SEED_EVENTS[0];
+    const ics = buildIcs(
+      { event: { ...ev, title: 'Aurelia, Julian; "Wedding" — ' + 'x'.repeat(120) }, tasks: [], vendors: [], rsvps: [], budget: null, budgetItems: [] },
+      '2026-10-31T00:00:00.000Z'
+    );
+    if (!ics.startsWith('BEGIN:VCALENDAR') || !ics.includes('END:VCALENDAR')) throw new Error('Malformed ICS');
+    const tooLong = ics.split('\r\n').find((l) => new TextEncoder().encode(l).length > 75);
+    if (tooLong) throw new Error('ICS line exceeds 75 octets');
+    const unfolded = ics.replace(/\r\n /g, '');
+    if (!unfolded.includes('\\,') || !unfolded.includes('\\;')) throw new Error('ICS special chars not escaped');
+    if (csvCell('=HYPERLINK("evil")') !== '"\'=HYPERLINK(""evil"")"') throw new Error('CSV formula not neutralised');
+    return 'ICS lines folded to <=75 octets with escaped , and ;; CSV cells starting with = + - @ are neutralised.';
+  });
+
+  // 14. Readiness score
+  runCheck('chk_readiness', 'FEATURE_LOGIC', 'Readiness Engine: Bounded Score, Over-Budget & Overdue Detection', () => {
+    const ev = SEED_EVENTS[0];
+    const items = SEED_BUDGET_ITEMS.filter((b) => b.event_id === ev.id);
+    const budget = calculateEventBudget(items, 1000, ev.guest_count);
+    const tasks = getInitialTasks().filter((t) => t.event_id === ev.id);
+    const report = computeReadiness({ event: ev, tasks, budget, vendors: [], rsvps: [], manualChecklist: {}, today: '2030-01-01' });
+    if (report.score < 0 || report.score > 100) throw new Error('Score out of range');
+    if (!report.insights.some((i) => i.id === 'over-budget' && i.severity === 'critical')) throw new Error('Over-budget not flagged');
+    if (!report.insights.some((i) => i.id === 'overdue')) throw new Error('Overdue tasks not flagged');
+    return `Score ${report.score}/100 (grade ${report.grade}); flagged over-budget and overdue tasks.`;
+  });
+
+  // 15. Vendor checklist
+  runCheck('chk_vendor_checklist', 'FEATURE_LOGIC', 'Vendor Checklist: Event-Type Templates, Auto-Linking & Booking Windows', () => {
+    const rows = buildVendorChecklist({ event_type: 'wedding', date: '2027-05-15' }, [], { photo: true }, '2027-04-01');
+    const photo = rows.find((r) => r.key === 'photo');
+    const venue = rows.find((r) => r.key === 'venue');
+    if (photo?.state !== 'booked') throw new Error('Manual tick ignored');
+    if (!venue?.overdue) throw new Error('Overdue venue not detected');
+    if (venue.bookByDate !== '2026-05-16') throw new Error(`Wrong book-by date ${venue.bookByDate}`);
+    return 'Wedding template: manual ticks respected, venue booking window (52 wks) computed and overdue flagged.';
+  });
+
+  // 16. Offline assistant
+  runCheck('chk_local_assistant', 'FEATURE_LOGIC', 'Offline Assistant: Understands Reschedule, Budget & Task Requests', () => {
+    const ctx = {
+      eventContext: { title: 'T', guest_count: 100, event_type: 'wedding' },
+      tasksSummary: [{ id: 'a', title: 'Venue Contract Signing' }, { id: 'b', title: 'Florist Booking' }],
+    };
+    const shift = buildLocalAssistantReply('Delay the florist by 2 weeks', ctx).proposed_actions[0];
+    if (shift?.tool_name !== 'shift_schedule' || shift.payload.target_task_id !== 'b' || shift.payload.delta_days !== 14) {
+      throw new Error('Reschedule intent wrong');
+    }
+    const add = buildLocalAssistantReply('Add a DJ for $1,200', ctx).proposed_actions[0];
+    if (add?.tool_name !== 'add_budget_item' || add.payload.unit_cost !== 1200) throw new Error('Budget intent wrong');
+    if (add.payload.name !== 'DJ') throw new Error(`Item name not cleaned: ${add.payload.name}`);
+    const perGuest = buildLocalAssistantReply('add late night snacks $12 per guest', ctx).proposed_actions[0];
+    if (perGuest?.payload.quantity !== 100 || perGuest.payload.is_per_guest !== true) throw new Error('Per-guest intent wrong');
+    return 'Matched tasks by name, parsed day/week deltas and $ amounts (incl. per-guest) into structured tool proposals.';
+  });
+
+  // 17. Ideas + moodboard determinism
+  runCheck('chk_ideas_moodboard', 'FEATURE_LOGIC', 'Idea & Moodboard Generators: Deterministic, Brief-Aware & Budget-Tiered', () => {
+    const req = { eventType: 'birthday', guestCount: 50, targetBudget: 2000, interests: 'jazz' };
+    const a = generateIdeas(req, 1);
+    const b = generateIdeas(req, 1);
+    if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error('Ideas not deterministic');
+    if (a.tier !== 'budget-smart') throw new Error('Wrong budget tier');
+    if (!a.ideas.some((i) => i.category === 'Money-saver')) throw new Error('No money-savers for tight budget');
+    const m1 = generateMoodboard({ prompt: 'boho desert terracotta', eventId: 'e' });
+    const m2 = generateMoodboard({ prompt: 'royal emerald velvet palace', eventId: 'e' });
+    if (m1.color_Swatches[0].hex === m2.color_Swatches[0].hex) throw new Error('Moodboard ignores the brief');
+    return 'Same input => same ideas; tight budgets get savers; different briefs yield different palettes.';
+  });
+
+  // 18. Engine cycle safety for UI
+  runCheck('chk_cycle_guard_ui', 'FEATURE_LOGIC', 'CPM Engine: Cycle Is Reported (Never Silently Loops) For UI Guarding', () => {
+    const mk = (id: string, deps: string[]): TaskRecord => ({
+      id, event_id: 'e', title: id, category: 'c', milestone_code: 'T-1', start_day_offset: 0,
+      duration_days: 1, buffer_days: 0, start_date: '2026-11-01', due_date: '2026-11-02',
+      status: 'todo', assigned_to: 'x', dependencies: deps, is_critical_path: false,
+    });
+    try {
+      computeCriticalPath([mk('a', ['b']), mk('b', ['a'])]);
+    } catch (e) {
+      if (e instanceof CyclicDependencyError) return 'Cyclic graph raises CyclicDependencyError, which the UI now catches and displays as a banner.';
+    }
+    throw new Error('Cycle not detected');
+  });
+
+  // 19. Untrusted URL handling
+  runCheck('chk_safe_urls', 'PROMPT_INJECTION_SSRF', 'URL Guard: Blocks javascript:/data: Links From LLM or OpenStreetMap Data', () => {
+    for (const bad of ['javascript:alert(1)', 'data:text/html,<script>', 'vbscript:x', 'httpjavascript:1', '//evil.com', '']) {
+      if (safeHttpUrl(bad)) throw new Error(`Accepted unsafe URL: ${bad}`);
+    }
+    if (!safeHttpUrl('https://www.google.com/travel/hotels?q=a')) throw new Error('Rejected a valid https URL');
+    return 'Only well-formed http(s) URLs reach <a href>; script/data/protocol-relative URLs are dropped.';
+  });
+
+  // 20. Key-free Google Calendar + OpenStreetMap helpers
+  runCheck('chk_calendar_maps', 'FEATURE_LOGIC', 'Google Calendar Template Link, OAuth Client-ID Validation & OSM Embed Helpers', () => {
+    const emails = Array.from({ length: 400 }, (_, i) => `guest${i}@example.com`);
+    const r = buildGoogleCalendarTemplateUrl({ title: 'A & B', date: '2027-05-15', location: 'Napa, CA', event_days: 2, event_type: 'wedding' }, ['x@y.com', 'not-an-email']);
+    const u = new URL(r.url);
+    if (u.origin + u.pathname !== 'https://calendar.google.com/calendar/render') throw new Error('Wrong Google Calendar endpoint');
+    if (u.searchParams.get('action') !== 'TEMPLATE' || u.searchParams.get('dates') !== '20270515/20270517') throw new Error('Wrong dates/action');
+    if (u.searchParams.get('text') !== 'A & B' || u.searchParams.get('add') !== 'x@y.com') throw new Error('Title/guests not encoded correctly');
+    const big = buildGoogleCalendarTemplateUrl({ title: 'T', date: '2027-05-15', location: 'L', event_days: 1, event_type: 'x' }, emails);
+    if (big.url.length > 2000 || !big.truncated || big.includedGuests < 10) throw new Error('Long guest lists must be truncated under the URL limit');
+    if (!isValidGoogleClientId('1234567890-abc123def.apps.googleusercontent.com') || isValidGoogleClientId('GOCSPX-secretvalue') || isValidGoogleClientId('<script>')) throw new Error('Client-ID validation wrong');
+    if (isValidMapsKey('short') || !isValidMapsKey('AIzaSyA1234567890abcdefghijklmnopqrstu')) throw new Error('Maps key validation wrong');
+    if (!osmEmbedUrl(38.3, -122.3).startsWith('https://www.openstreetmap.org/export/embed.html?bbox=') ) throw new Error('OSM embed URL wrong');
+    const d = haversineMiles(40.7128, -74.006, 34.0522, -118.2437);
+    if (Math.abs(d - 2445) > 15) throw new Error(`Haversine off: ${d}`);
+    return 'Calendar link needs no key, encodes safely, caps guests under the URL limit; client IDs / Maps keys validated; OSM embed + distances correct.';
+  });
 
   const passedChecks = checks.filter((c) => c.passed).length;
   return {

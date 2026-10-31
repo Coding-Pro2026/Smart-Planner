@@ -7,6 +7,7 @@ import {
   Send,
   X,
 } from 'lucide-react';
+import { MiniMarkdown } from './MiniMarkdown';
 import {
   AgentChatMessage,
   BudgetItemRecord,
@@ -22,20 +23,23 @@ interface AgentOrchestratorPanelProps {
   budgetItems: BudgetItemRecord[];
   tasks: TaskRecord[];
   vendors: VendorRecord[];
-  fastModel: string;
   onSendMessage: (userPrompt: string) => Promise<void>;
   onAcceptProposal: (messageId: string, actions: ProposedToolAction[]) => void;
   onRejectProposal: (messageId: string) => void;
   isOrchestrating: boolean;
 }
 
-const QUICK_SUGGESTIONS = [
-  'Delay Venue Contract by 2 weeks',
-  'Add garden lighting ($3,400) & setup task',
-  'Add late-night espresso cart for guests',
-];
+function suggestionsFor(eventType: string): string[] {
+  const t = (eventType || '').toLowerCase();
+  const common = ["What's next on my timeline?", 'How is my budget?'];
+  if (t.includes('wedding')) return ['Add a $2,500 photo booth', 'Delay the first task by 2 weeks', ...common];
+  if (t.includes('birthday')) return ['Add a DJ for $600', 'Add cake $250', ...common];
+  if (t.includes('funeral') || t.includes('memorial')) return ['Add livestream AV $800', 'Add a task: print order-of-service', ...common];
+  return ['Add portable restrooms $900', 'Add a task: confirm food truck permits', ...common];
+}
 
 export const AgentOrchestratorPanel: React.FC<AgentOrchestratorPanelProps> = ({
+  event,
   messages,
   onSendMessage,
   onAcceptProposal,
@@ -79,6 +83,8 @@ export const AgentOrchestratorPanel: React.FC<AgentOrchestratorPanelProps> = ({
             <input
               type="text"
               placeholder="Ask to schedule a task, shift dates, or add an expense..."
+              maxLength={500}
+              aria-label="Message the AI planning assistant"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               disabled={isOrchestrating}
@@ -105,7 +111,7 @@ export const AgentOrchestratorPanel: React.FC<AgentOrchestratorPanelProps> = ({
 
           {/* Subtle Quick Prompts */}
           <div className="flex flex-wrap items-center gap-2 pt-0.5">
-            {QUICK_SUGGESTIONS.map((q, idx) => (
+            {suggestionsFor(event.event_type).map((q, idx) => (
               <button
                 key={idx}
                 type="button"
@@ -136,9 +142,9 @@ export const AgentOrchestratorPanel: React.FC<AgentOrchestratorPanelProps> = ({
               )}
           </div>
 
-          <p className="text-stone-600 leading-relaxed line-clamp-3">
-            {latestMessage.content}
-          </p>
+          <div aria-live="polite" className="max-h-64 overflow-y-auto pr-1">
+            <MiniMarkdown text={latestMessage.content} className="text-stone-600 leading-relaxed" />
+          </div>
 
           {latestMessage.proposed_actions &&
             latestMessage.proposed_actions.length > 0 &&

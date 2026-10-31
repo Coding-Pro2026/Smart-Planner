@@ -1,4 +1,7 @@
 import React, { useEffect, useState } from 'react';
+import { postJson } from '../lib/api';
+import { safeHttpUrl } from '../lib/url';
+import { buildIcs, downloadTextFile, safeFilename } from '../lib/exporters';
 import {
   AlertCircle,
   Calendar,
@@ -18,7 +21,6 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import type { User } from 'firebase/auth';
 import {
   AuditLogRecord,
   CollaboratorRecord,
@@ -29,13 +31,18 @@ import {
 } from '../types/domain';
 import {
   GoogleCalendarSyncResult,
+  buildGoogleCalendarTemplateUrl,
   getAccessToken,
+  getGoogleClientId,
   googleSignIn,
+  isValidGoogleClientId,
+  setGoogleClientId,
   initAuth,
   isValidEmailAddress,
   logout,
   sendGoogleCalendarRsvpInvites,
   syncGoogleCalendarRsvpStatuses,
+  type User,
 } from '../lib/googleCalendarRsvp';
 
 interface ThemeAndRsvpViewProps {
@@ -64,6 +71,7 @@ export const ThemeAndRsvpView: React.FC<ThemeAndRsvpViewProps> = ({
   const [visionPrompt, setVisionPrompt] = useState('');
   const [uploadedPreviewUrl, setUploadedPreviewUrl] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [moodboardError, setMoodboardError] = useState<string | null>(null);
   const [copiedHex, setCopiedHex] = useState<string | null>(null);
 
   // Guest RSVP Form State
@@ -74,7 +82,11 @@ export const ThemeAndRsvpView: React.FC<ThemeAndRsvpViewProps> = ({
   const [dietary, setDietary] = useState('None');
   const [seatingTable, setSeatingTable] = useState('Table 04 — Conservatory');
 
-  // Google Calendar OAuth & Sync State
+  // Google Calendar OAuth & Sync State (uses the USER'S OWN OAuth client; none of ours)
+  const [clientId, setClientId] = useState<string>(() => getGoogleClientId());
+  const [showSetup, setShowSetup] = useState(false);
+  const [clientDraft, setClientDraft] = useState('');
+  const [setupError, setSetupError] = useState<string | null>(null);
   const [needsAuth, setNeedsAuth] = useState(true);
   const [googleUser, setGoogleUser] = useState<User | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
@@ -206,8 +218,64 @@ export const ThemeAndRsvpView: React.FC<ThemeAndRsvpViewProps> = ({
     }
   };
 
+  const pendingEmails = rsvps
+    .filter((r) => r.status === 'pending' && isValidEmailAddress(r.contact))
+    .map((r) => r.contact.trim());
+
+  const inviteText = `You're invited to ${event.title}!\n\nWhen: ${event.date}\nWhere: ${event.location}\n\nPlease reply with your attendance (and any dietary needs) so we can plan perfectly. We can't wait to celebrate with you!`;
+
+  const handleMailtoReminder = () => {
+    if (pendingEmails.length === 0) return;
+    const subject = encodeURIComponent(`Please RSVP: ${event.title}`);
+    const body = encodeURIComponent(inviteText);
+    // BCC keeps guests' addresses private; keep the URL within common mail-client limits.
+    const bcc = encodeURIComponent(pendingEmails.slice(0, 40).join(','));
+    window.location.href = `mailto:?bcc=${bcc}&subject=${subject}&body=${body}`;
+    setCalendarFeedback({
+      type: 'success',
+      message:
+        pendingEmails.length > 40
+          ? `Opened your email app with the first 40 of ${pendingEmails.length} guests — send again for the rest.`
+          : `Opened your email app with ${pendingEmails.length} guest(s) in BCC.`,
+    });
+  };
+
+  const handleAddToGoogleCalendar = () => {
+    const { url, includedGuests, truncated } = buildGoogleCalendarTemplateUrl(
+      event,
+      rsvps.map((r) => r.contact)
+    );
+    window.open(url, '_blank', 'noopener,noreferrer');
+    setCalendarFeedback({
+      type: 'success',
+      message: `Opened Google Calendar with the event${includedGuests ? ` and ${includedGuests} guest(s)` : ''} pre-filled — click Save there to send the invitations.${truncated ? ' (Too many guests for one link: add the rest in Google Calendar, or use the .ics file.)' : ''}`,
+    });
+  };
+
+  const handleCopyInviteText = async () => {
+    try {
+      await navigator.clipboard.writeText(inviteText);
+      setCalendarFeedback({ type: 'success', message: 'Invite message copied to your clipboard.' });
+    } catch {
+      setCalendarFeedback({ type: 'error', message: 'Clipboard is not available — select and copy the text manually.' });
+    }
+  };
+
+  const handleDownloadInviteIcs = () => {
+    const ok = downloadTextFile(
+      safeFilename(`${event.title}-invite`, 'ics'),
+      buildIcs({ event, tasks: [], vendors: [], rsvps: [], budget: null, budgetItems: [] }),
+      'text/calendar'
+    );
+    setCalendarFeedback(
+      ok
+        ? { type: 'success', message: 'Calendar invite downloaded — attach it to your invitations.' }
+        : { type: 'error', message: 'Download is not supported in this browser.' }
+    );
+  };
+
   const handleCopyHex = (hex: string) => {
-    navigator.clipboard?.writeText(hex);
+    navigator.clipboard?.writeText(hex).catch(() => undefined);
     setCopiedHex(hex);
     setTimeout(() => setCopiedHex(null), 1500);
   };
@@ -215,6 +283,15 @@ export const ThemeAndRsvpView: React.FC<ThemeAndRsvpViewProps> = ({
   const handleImageFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setMoodboardError('Please choose an image file (JPG, PNG or WebP).');
+      return;
+    }
+    if (file.size > 5_000_000) {
+      setMoodboardError('That image is over 5 MB — please choose a smaller one.');
+      return;
+    }
+    setMoodboardError(null);
     const reader = new FileReader();
     reader.onload = () => {
       if (typeof reader.result === 'string') {
@@ -226,26 +303,27 @@ export const ThemeAndRsvpView: React.FC<ThemeAndRsvpViewProps> = ({
 
   const handleRunMoodboardAgent = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isAnalyzing) return;
     setIsAnalyzing(true);
-    try {
-      const response = await fetch('/api/agents/analyze-moodboard', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          eventId: event.id,
-          prompt:
-            visionPrompt.trim() ||
-            `Luxury ${event.event_type} tablescape at ${event.location} with architectural lighting`,
-          imageBase64: uploadedPreviewUrl,
-          mimeType: 'image/jpeg',
-        }),
-      });
-      const data = await response.json();
-      if (data && data.color_Swatches) {
-        onUpdateMoodboard(data);
-      }
-    } finally {
-      setIsAnalyzing(false);
+    setMoodboardError(null);
+    const res = await postJson<MoodboardPalette>(
+      '/api/agents/analyze-moodboard',
+      {
+        eventId: event.id,
+        eventType: event.event_type,
+        prompt:
+          visionPrompt.trim() ||
+          `${event.event_type} at ${event.location} with warm, elegant styling`,
+        imageBase64: uploadedPreviewUrl,
+        mimeType: uploadedPreviewUrl?.match(/^data:([^;]+);/)?.[1] ?? 'image/jpeg',
+      },
+      { timeoutMs: 60_000 }
+    );
+    setIsAnalyzing(false);
+    if (res.ok && res.data && Array.isArray(res.data.color_Swatches)) {
+      onUpdateMoodboard({ ...res.data, event_id: event.id });
+    } else {
+      setMoodboardError(res.ok ? 'No palette was returned. Please try again.' : res.error);
     }
   };
 
@@ -285,16 +363,24 @@ export const ThemeAndRsvpView: React.FC<ThemeAndRsvpViewProps> = ({
               Send Email Invitations &amp; Sync Guest RSVPs
             </h2>
             <p className="text-xs text-stone-500 leading-relaxed">
-              Publish <strong className="text-stone-800">{event.title}</strong> ({event.date}) to your Google Calendar and automatically email invitations to your guest list. When guests click{' '}
-              <strong className="text-emerald-700">Yes</strong> or{' '}
-              <strong className="text-rose-700">No</strong> in their email invitation, click{' '}
-              <strong className="text-stone-800">Sync Responses</strong> to update their RSVP status here.
+              Put <strong className="text-stone-800">{event.title}</strong> ({event.date}) on your Google Calendar and invite your guests —
+              no account linking needed (use <strong className="text-stone-800">Add to Google Calendar</strong> below). Optionally enable
+              two-way sync with your own free Google Cloud OAuth client to pull guests’ Yes/No answers back in automatically.
             </p>
           </div>
 
           {/* Auth & Sync Controls */}
           <div className="flex flex-wrap items-center gap-3">
             {needsAuth || !accessToken ? (
+              !clientId ? (
+              <button
+                type="button"
+                onClick={() => setShowSetup((v) => !v)}
+                className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-stone-800 bg-stone-100 hover:bg-stone-200 rounded-2xl transition-colors"
+              >
+                Enable two-way sync (optional)
+              </button>
+              ) : (
               <button
                 type="button"
                 onClick={handleGoogleLogin}
@@ -331,6 +417,7 @@ export const ThemeAndRsvpView: React.FC<ThemeAndRsvpViewProps> = ({
                   {isLoggingIn ? 'Signing in...' : 'Sign in with Google'}
                 </span>
               </button>
+              )
             ) : (
               <div className="flex flex-wrap items-center gap-2.5">
                 <button
@@ -361,7 +448,7 @@ export const ThemeAndRsvpView: React.FC<ThemeAndRsvpViewProps> = ({
 
                 {event.google_calendar_html_link && (
                   <a
-                    href={event.google_calendar_html_link}
+                    href={safeHttpUrl(event.google_calendar_html_link) ?? '#'}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-semibold text-indigo-700 bg-indigo-50/80 hover:bg-indigo-100 rounded-2xl transition-colors"
@@ -415,6 +502,96 @@ export const ThemeAndRsvpView: React.FC<ThemeAndRsvpViewProps> = ({
                 </span>
               </>
             )}
+          </div>
+        </div>
+
+        {showSetup && !clientId && (
+          <div className="p-5 rounded-2xl bg-stone-50 border border-stone-200 space-y-3 text-xs text-stone-600">
+            <h4 className="text-xs font-bold text-stone-900">Enable two-way sync with your own Google OAuth client (free, ~3 min)</h4>
+            <ol className="list-decimal pl-5 space-y-1 leading-relaxed">
+              <li>In <a className="text-[#4A6B53] hover:underline" href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener noreferrer">Google Cloud Console</a>, create a project and enable the <strong>Google Calendar API</strong>.</li>
+              <li>Under <strong>Google Auth platform → Clients</strong>, create an <strong>OAuth client ID</strong> of type <strong>Web application</strong>.</li>
+              <li>Add <code className="font-mono">{typeof window !== 'undefined' ? window.location.origin : ''}</code> as an <strong>Authorized JavaScript origin</strong>.</li>
+              <li>Keep the app in “Testing” and add your own Google account as a test user. Paste the Client ID below.</li>
+            </ol>
+            <div className="flex flex-wrap gap-2">
+              <input
+                value={clientDraft}
+                onChange={(e) => setClientDraft(e.target.value)}
+                placeholder="1234567890-abc123.apps.googleusercontent.com"
+                className="flex-1 min-w-[240px] px-3 py-2 border border-stone-300 rounded-xl font-mono"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  if (!isValidGoogleClientId(clientDraft)) {
+                    setSetupError('That does not look like a Google OAuth Client ID (…apps.googleusercontent.com).');
+                    return;
+                  }
+                  setGoogleClientId(clientDraft);
+                  setClientId(clientDraft.trim());
+                  setClientDraft('');
+                  setSetupError(null);
+                  setShowSetup(false);
+                }}
+                className="px-4 py-2 font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl"
+              >
+                Save Client ID
+              </button>
+            </div>
+            {setupError && <p role="alert" className="text-rose-700">{setupError}</p>}
+            <p className="text-[11px] text-stone-400 leading-relaxed">
+              A Client ID is not a secret. The sign-in happens directly between your browser and Google; PlanGenie only asks for permission to manage events on your calendar and keeps the token in memory.
+            </p>
+          </div>
+        )}
+        {clientId && (
+          <p className="text-[11px] text-stone-400">
+            Using your Google OAuth client.{' '}
+            <button type="button" className="underline hover:text-stone-600" onClick={() => { setGoogleClientId(''); setClientId(''); setNeedsAuth(true); }}>
+              Remove
+            </button>
+          </p>
+        )}
+
+        {/* Keyless alternatives: work without any Google/Firebase configuration */}
+        <div className="pt-4 border-t border-stone-100 space-y-3">
+          <div>
+            <h4 className="text-xs font-bold text-stone-900">Invite guests without Google</h4>
+            <p className="text-[11px] text-stone-500">
+              No account needed — email your guests directly, or share a calendar file they can open in any app.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={handleAddToGoogleCalendar}
+              className="px-3.5 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl"
+            >
+              Add to Google Calendar
+            </button>
+            <button
+              type="button"
+              disabled={pendingEmails.length === 0}
+              onClick={handleMailtoReminder}
+              className="px-3.5 py-2 text-xs font-semibold text-[#4A6B53] bg-[#EDF3EE] hover:bg-[#DFECE1] disabled:opacity-50 rounded-xl"
+            >
+              Email {pendingEmails.length} guest{pendingEmails.length === 1 ? '' : 's'} awaiting reply
+            </button>
+            <button
+              type="button"
+              onClick={handleCopyInviteText}
+              className="px-3.5 py-2 text-xs font-semibold text-stone-700 bg-stone-100 hover:bg-stone-200 rounded-xl"
+            >
+              Copy invite message
+            </button>
+            <button
+              type="button"
+              onClick={handleDownloadInviteIcs}
+              className="px-3.5 py-2 text-xs font-semibold text-stone-700 bg-stone-100 hover:bg-stone-200 rounded-xl"
+            >
+              Download invite (.ics)
+            </button>
           </div>
         </div>
 
@@ -715,6 +892,11 @@ export const ThemeAndRsvpView: React.FC<ThemeAndRsvpViewProps> = ({
                 'Generate Palette & Decor Ideas'
               )}
             </button>
+            {moodboardError && (
+              <p role="alert" className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2">
+                {moodboardError}
+              </p>
+            )}
           </form>
         </div>
 
