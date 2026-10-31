@@ -37,6 +37,7 @@ export function sanitizeOrchestratorOutput(parsed: any): {
   sender_agent: AgentName;
   delegated_agents: AgentName[];
   reply: string;
+  hasReply: boolean;
   actions: Omit<ProposedToolAction, 'id'>[];
 } {
   const asAgent = (v: unknown): AgentName | null => AGENTS.find((a) => a === v) ?? null;
@@ -56,6 +57,7 @@ export function sanitizeOrchestratorOutput(parsed: any): {
     sender_agent: asAgent(parsed?.sender_agent) ?? 'Supervisor Agent',
     delegated_agents: delegated.length ? delegated : ['Supervisor Agent'],
     reply: cleanText(parsed?.reply_markdown, 4000, 'Here are my suggestions.').trim(),
+    hasReply: cleanText(parsed?.reply_markdown, 4000).length > 0,
     actions,
   };
 }

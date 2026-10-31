@@ -54,7 +54,7 @@ let envCooldownUntil = 0;
  * optional server-side key from the environment, otherwise null => deterministic local engine.
  * An invalid BYOK config is a 400 (never silently ignored).
  */
-function getAi(req: Request): AiClient | null {
+function getAi(req: Request, res: Response): AiClient | null {
   let resolved: ReturnType<typeof resolveAiConfig>;
   try {
     resolved = resolveAiConfig(req);
@@ -63,7 +63,12 @@ function getAi(req: Request): AiClient | null {
   }
   if (!resolved) return null;
   if (!resolved.userSupplied && Date.now() < envCooldownUntil) return null;
-  return createAiClient(resolved.config, resolved.userSupplied);
+  // If the browser goes away (Cancel pressed / tab closed), stop the upstream call so we don't burn the user's quota.
+  const ctrl = new AbortController();
+  res.on('close', () => {
+    if (!res.writableEnded) ctrl.abort();
+  });
+  return createAiClient(resolved.config, resolved.userSupplied, undefined, undefined, ctrl.signal);
 }
 
 /** Records an AI failure. Users who supplied their own key are told why we fell back. */
@@ -282,7 +287,7 @@ async function startServer() {
     const cleanPrompt = sanitization.sanitizedText;
     const checkpointId = `ckpt_${Date.now().toString(36)}`;
 
-    const ai = getAi(req);
+    const ai = getAi(req, res);
     if (ai) {
       try {
         const modelToUse = ai.model;
@@ -351,7 +356,10 @@ IMPORTANT ARCHITECTURE RULE:
         }));
 
         const parsed = parseModelJson(response.text);
+        if (process.env.PLANGENIE_DEBUG_AI === '1') console.warn('[ai-debug] orchestrate raw:', String(response.text).slice(0, 600));
         const clean = sanitizeOrchestratorOutput(parsed);
+        // A model that returns neither a reply nor any valid action is a failed call: use the local engine instead.
+        if (!clean.hasReply && clean.actions.length === 0) throw new Error('The model returned an empty or off-spec response');
         const actions: ProposedToolAction[] = clean.actions.map((act, idx) => ({
           id: `act_${Date.now()}_${idx}`,
           ...act,
@@ -399,7 +407,7 @@ IMPORTANT ARCHITECTURE RULE:
     }
     const sanitized = sanitizeUntrustedInput(rawQuoteText.slice(0, 20_000));
 
-    const ai = getAi(req);
+    const ai = getAi(req, res);
     if (ai && sanitized.sanitizedText.trim().length > 10) {
       try {
         const response = await withTimeout(ai.models.generateContent({
@@ -537,7 +545,7 @@ ${sanitized.sanitizedText}`,
     const { prompt, imageBase64, mimeType, eventId } = req.body ?? {};
     const cleanPrompt = sanitizeUntrustedInput(String(prompt ?? '')).sanitizedText;
 
-    const ai = getAi(req);
+    const ai = getAi(req, res);
     if (ai) {
       try {
         const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [];
@@ -669,7 +677,7 @@ ${sanitized.sanitizedText}`,
           step_4_sub_category_mapping: `Synthesizing nuanced sub-categories: (1) Speaking & Toast Order (Who Speaks First), and (2) ${parsedDays}-Day Regional Run-of-Show & Ritual Checklist.`,
         };
 
-    const ai = getAi(req);
+    const ai = getAi(req, res);
     if (ai) {
       try {
         const response = await withTimeout(ai.models.generateContent({
@@ -898,7 +906,7 @@ CHAIN-OF-THOUGHT INSTRUCTIONS (Complete "chain_of_thought_analysis" FIRST):
     const detectedTitle = parsedIntake.title;
     const detectedDate = parsedIntake.date;
 
-    const ai = getAi(req);
+    const ai = getAi(req, res);
     if (ai) {
       try {
         const historyText = Array.isArray(conversationHistory)
@@ -1262,7 +1270,7 @@ Instructions:
     };
     const baseline: IdeaSet = generateIdeas(request, Math.floor(Math.random() * 1000));
 
-    const ai = getAi(req);
+    const ai = getAi(req, res);
     if (ai) {
       try {
         const response = await withTimeout(

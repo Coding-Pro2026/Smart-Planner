@@ -55,7 +55,8 @@ async function main() {
     assert.equal(r.headers['x-goog-api-key'], KEY);
     const b = JSON.parse(r.body!);
     assert.equal(b.generationConfig.responseMimeType, 'application/json');
-    assert.equal(b.systemInstruction.parts[0].text, 'be brief');
+    assert.ok(b.systemInstruction.parts[0].text.startsWith('be brief') && b.systemInstruction.parts[0].text.includes('JSON Schema'));
+    assert.equal(b.generationConfig.responseSchema, undefined, 'schema must be in the prompt, not responseSchema');
   });
 
   await check('Claude request: forced tool use for structured JSON, version header', () => {
@@ -194,6 +195,13 @@ async function main() {
     assert.equal(sanitizeMoodboard({ title: 'Sage Edit:525252,color_Swatches:[{hex:', color_Swatches: ['#4A5D4E', '#C67D5A', '#F3EFEA'].map((hex) => ({ hex, name: 'n', usage: 'u' })) }, 'e')!.title, 'Custom Palette');
     assert.equal(cleanTitle('x'.repeat(300), 'fb', 40).length, 40);
     assert.equal(cleanTitle('{"a":1}', 'fb'), 'fb');
+  });
+
+  await check('Orchestrator: an empty model response is detectable (triggers local fallback)', () => {
+    const o = sanitizeOrchestratorOutput({});
+    assert.equal(o.hasReply, false);
+    assert.equal(o.actions.length, 0);
+    assert.equal(sanitizeOrchestratorOutput({ reply_markdown: 'ok' }).hasReply, true);
   });
 
   console.log(`\nAI layer: ${passed}/${passed + failed} checks passed`);

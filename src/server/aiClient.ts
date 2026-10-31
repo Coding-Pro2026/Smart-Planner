@@ -96,7 +96,7 @@ export function resolveAiConfig(req: Request): { config: AiConfig; userSupplied:
   return null;
 }
 
-async function call(cfg: AiConfig, params: GenerateParams, fetcher: Fetcher, timeoutMs: number) {
+async function call(cfg: AiConfig, params: GenerateParams, fetcher: Fetcher, timeoutMs: number, signal?: AbortSignal) {
   const norm = normalizeRequest(params);
   const send = async (jsonMode: boolean) => {
     const spec = buildGenerateRequest(cfg, norm, { jsonMode });
@@ -106,6 +106,7 @@ async function call(cfg: AiConfig, params: GenerateParams, fetcher: Fetcher, tim
       body: spec.body,
       timeoutMs,
       allowPrivate: allowPrivate(),
+      signal,
     });
     let data: any = null;
     try {
@@ -118,7 +119,7 @@ async function call(cfg: AiConfig, params: GenerateParams, fetcher: Fetcher, tim
 
   let { res, data } = await send(true);
   // One quick retry for transient provider overload / rate-limit responses.
-  if ([429, 500, 502, 503, 504].includes(res.status)) {
+  if ([429, 500, 502, 503, 504].includes(res.status) && !signal?.aborted) {
     await new Promise((r) => setTimeout(r, 1200));
     ({ res, data } = await send(true));
   }
@@ -137,7 +138,8 @@ export function createAiClient(
   cfg: AiConfig,
   userSupplied: boolean,
   fetcher: Fetcher = safeRequest,
-  timeoutMs = 45_000
+  timeoutMs = 45_000,
+  signal?: AbortSignal
 ): AiClient {
   return {
     provider: cfg.provider,
@@ -150,7 +152,7 @@ export function createAiClient(
           cfg.provider !== 'gemini' && params.config?.tools
             ? { ...params, config: { ...params.config, tools: undefined } }
             : params;
-        return call(cfg, p, fetcher, timeoutMs);
+        return call(cfg, p, fetcher, timeoutMs, signal);
       },
     },
   };

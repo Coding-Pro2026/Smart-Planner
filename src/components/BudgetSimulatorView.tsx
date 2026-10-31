@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -22,6 +22,7 @@ interface BudgetSimulatorViewProps {
   onResetSimulation: () => void;
   onAddBudgetItem: (item: Omit<BudgetItemRecord, 'id' | 'event_id' | 'estimated_cost'>) => void;
   onDeleteBudgetItem: (id: string) => void;
+  onUpdateBudgetItem: (id: string, patch: Partial<Pick<BudgetItemRecord, 'status' | 'actual_cost'>>) => void;
   onUpdateTargetBudget: (newBudget: number) => void;
   initialSubView?: 'current' | 'forecast';
 }
@@ -36,11 +37,23 @@ export const BudgetSimulatorView: React.FC<BudgetSimulatorViewProps> = ({
   onResetSimulation,
   onAddBudgetItem,
   onDeleteBudgetItem,
+  onUpdateBudgetItem,
   onUpdateTargetBudget,
   initialSubView = 'current',
 }) => {
   const [subView, setSubView] = useState<'current' | 'forecast'>(initialSubView);
   const [showAddForm, setShowAddForm] = useState(false);
+  // Edit the target budget as free text and commit on blur/Enter (committing per keystroke made it uneditable).
+  const [targetDraft, setTargetDraft] = useState(String(event.target_budget));
+  useEffect(() => setTargetDraft(String(event.target_budget)), [event.target_budget, event.id]);
+  const commitTarget = () => {
+    const v = Number(targetDraft);
+    if (targetDraft.trim() !== '' && Number.isFinite(v) && v >= 500 && v <= 1e9) {
+      if (Math.round(v) !== Math.round(event.target_budget)) onUpdateTargetBudget(Math.round(v));
+    } else {
+      setTargetDraft(String(event.target_budget)); // invalid: revert
+    }
+  };
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
   const [newName, setNewName] = useState('');
   const [newCategory, setNewCategory] = useState('Catering & Sommelier');
@@ -245,6 +258,12 @@ export const BudgetSimulatorView: React.FC<BudgetSimulatorViewProps> = ({
                   </span>
                 </div>
                 <div className="flex justify-between text-stone-600">
+                  <span>Paid so far</span>
+                  <span className="font-mono tabular-nums font-semibold text-stone-800">
+                    ${budgetResult.totalActualSpend.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                  </span>
+                </div>
+                <div className="flex justify-between text-stone-600">
                   <span>Remaining Budget</span>
                   <span
                     className={`font-mono tabular-nums font-semibold ${
@@ -312,10 +331,13 @@ export const BudgetSimulatorView: React.FC<BudgetSimulatorViewProps> = ({
                     <span className="text-sm text-stone-500 font-mono">$</span>
                     <input
                       type="number"
-                      min={1000}
+                      min={500}
                       step={500}
-                      value={event.target_budget}
-                      onChange={(e) => onUpdateTargetBudget(Math.max(1000, Number(e.target.value)))}
+                      aria-label="Total target budget in dollars"
+                      value={targetDraft}
+                      onChange={(e) => setTargetDraft(e.target.value)}
+                      onBlur={commitTarget}
+                      onKeyDown={(e) => e.key === 'Enter' && (e.currentTarget as HTMLInputElement).blur()}
                       className="w-36 px-3 py-2 text-sm font-mono tabular-nums border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600"
                     />
                   </div>
@@ -463,6 +485,7 @@ export const BudgetSimulatorView: React.FC<BudgetSimulatorViewProps> = ({
                     <th className="py-3.5 px-4">Type</th>
                     <th className="py-3.5 px-4 text-right">Base Cost</th>
                     <th className="py-3.5 px-4 text-right">Tax &amp; Buffer</th>
+                    <th className="py-3.5 px-4 text-right">Paid so far</th>
                     <th className="py-3.5 px-6 text-right">Total Cost</th>
                     <th className="py-3.5 px-4 text-right"></th>
                   </tr>
@@ -475,7 +498,16 @@ export const BudgetSimulatorView: React.FC<BudgetSimulatorViewProps> = ({
                         <div className="text-xs text-stone-500 mt-0.5">
                           <span>{item.category}</span>
                           <span aria-hidden="true"> · </span>
-                          <span className="capitalize">{item.status}</span>
+                          <select
+                            aria-label={`Status of ${item.name}`}
+                            value={item.status}
+                            onChange={(e) => onUpdateBudgetItem(item.id, { status: e.target.value as BudgetItemRecord['status'] })}
+                            className="capitalize bg-transparent border border-stone-200 rounded-md px-1 py-0.5 text-[11px] text-stone-600"
+                          >
+                            {(['planned', 'quoted', 'contracted', 'paid'] as const).map((st) => (
+                              <option key={st} value={st}>{st}</option>
+                            ))}
+                          </select>
                         </div>
                       </td>
                       <td className="py-4 px-4 text-stone-600 whitespace-nowrap">
@@ -490,6 +522,30 @@ export const BudgetSimulatorView: React.FC<BudgetSimulatorViewProps> = ({
                         +${(item.tax_amount + item.contingency_amount).toLocaleString('en-US', {
                           maximumFractionDigits: 0,
                         })}
+                      </td>
+                      <td className="py-4 px-4 text-right">
+                        <div className="inline-flex items-center gap-1 font-mono text-stone-600">
+                          $
+                          <input
+                            key={`${item.id}-${item.actual_cost}`}
+                            type="number"
+                            min={0}
+                            step="1"
+                            aria-label={`Amount paid for ${item.name}`}
+                            disabled={isSimulating}
+                            title={isSimulating ? 'Reset the simulation to edit payments' : 'Amount paid so far'}
+                            defaultValue={Math.round(item.actual_cost)}
+                            onBlur={(e) => {
+                              const v = Number(e.target.value);
+                              if (Number.isFinite(v) && v >= 0 && Math.round(v) !== Math.round(item.actual_cost)) {
+                                onUpdateBudgetItem(item.id, { actual_cost: v });
+                              } else {
+                                e.target.value = String(Math.round(item.actual_cost));
+                              }
+                            }}
+                            className="w-20 px-1.5 py-1 text-right border border-stone-200 rounded-md bg-white disabled:opacity-50"
+                          />
+                        </div>
                       </td>
                       <td className="py-4 px-6 text-right font-mono tabular-nums font-bold text-stone-900 text-sm">
                         ${item.deterministic_total.toLocaleString('en-US', {

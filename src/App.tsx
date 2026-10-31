@@ -81,6 +81,7 @@ import { ToastStack, ToastMessage } from './components/ToastStack';
 import { ReadinessCard } from './components/ReadinessCard';
 import { ExportMenu } from './components/ExportMenu';
 import { AiSettingsModal } from './components/AiSettingsModal';
+import { GettingStartedCard } from './components/GettingStartedCard';
 import { LegalView } from './components/LegalView';
 import { AI_CONFIG_EVENT, AI_WARNING_EVENT, aiLabel, isAiConfigured, loadAiConfig } from './lib/aiConfig';
 import { KeyRound } from 'lucide-react';
@@ -383,6 +384,7 @@ export default function App() {
   const [isNewEventModalOpen, setIsNewEventModalOpen] = useState(false);
   const [isOrchestrating, setIsOrchestrating] = useState(false);
   const [isAiSettingsOpen, setIsAiSettingsOpen] = useState(false);
+  const orchestrateAbortRef = useRef<AbortController | null>(null);
   const [aiStatusLabel, setAiStatusLabel] = useState<string>(() => aiLabel());
   const [aiConnected, setAiConnected] = useState<boolean>(() => isAiConfigured());
 
@@ -406,6 +408,11 @@ export default function App() {
       window.removeEventListener(AI_WARNING_EVENT, onWarn);
     };
   }, [pushToast]);
+
+  // Always start a screen at the top (previously the workspace inherited the landing page's scroll offset).
+  useEffect(() => {
+    window.scrollTo({ top: 0 });
+  }, [entryMode, activeTab, selectedEventId]);
 
   // Escape closes the "new event" dialog
   useEffect(() => {
@@ -618,6 +625,23 @@ export default function App() {
     if (target) {
       appendAuditLog(`Removed budget line item "${target.name}"`, 'BUDGET');
     }
+  };
+
+  const handleUpdateBudgetItem = (
+    id: string,
+    patch: Partial<Pick<BudgetItemRecord, 'status' | 'actual_cost'>>
+  ) => {
+    const target = budgetItems.find((b) => b.id === id);
+    if (!target) return;
+    const safe: typeof patch = { ...patch };
+    if (safe.actual_cost !== undefined) safe.actual_cost = Math.max(0, Number(safe.actual_cost) || 0);
+    setBudgetItems((prev) => prev.map((b) => (b.id === id ? { ...b, ...safe } : b)));
+    appendAuditLog(
+      safe.status
+        ? `Marked "${target.name}" as ${safe.status}`
+        : `Recorded $${Math.round(safe.actual_cost ?? 0).toLocaleString()} paid for "${target.name}"`,
+      'BUDGET'
+    );
   };
 
   const handleUpdateTargetBudget = (nextCap: number) => {
@@ -960,6 +984,8 @@ export default function App() {
     };
     setChatMessages((prev) => [...prev, userMsg]);
     setIsOrchestrating(true);
+    const controller = new AbortController();
+    orchestrateAbortRef.current = controller;
 
     try {
       const res = await postJson<{
@@ -991,7 +1017,7 @@ export default function App() {
           service_type: v.service_type,
           total_true_cost: v.parsed_terms?.total_true_cost,
         })),
-      });
+      }, { timeoutMs: 75_000, signal: controller.signal });
 
       let assistantMsg: AgentChatMessage;
       if (res.ok && res.data) {
@@ -1016,17 +1042,23 @@ export default function App() {
           role: 'assistant',
           sender_agent: 'Supervisor Agent',
           delegated_agents: ['Supervisor Agent'],
-          content: `I couldn't reach the planning service (${
-            res.ok ? 'empty response' : res.error
-          }). Your plan is unchanged — please try again in a moment.`,
+          content:
+            !res.ok && res.error === 'Cancelled.'
+              ? 'Cancelled — nothing was changed.'
+              : `I couldn't reach the planning service (${
+                  res.ok ? 'empty response' : res.error
+                }). Your plan is unchanged — please try again in a moment.`,
           timestamp: new Date().toISOString(),
         };
       }
       setChatMessages((prev) => [...prev, assistantMsg]);
     } finally {
+      orchestrateAbortRef.current = null;
       setIsOrchestrating(false);
     }
   };
+
+  const handleCancelOrchestrate = () => orchestrateAbortRef.current?.abort();
 
   const handleAcceptProposal = (messageId: string, actions: ProposedToolAction[]) => {
     let applied = 0;
@@ -1454,8 +1486,11 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col pg-aurora-bg text-stone-900">
+      <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[70] focus:px-4 focus:py-2 focus:bg-white focus:rounded-xl focus:shadow-lg focus:text-sm focus:font-semibold">
+        Skip to content
+      </a>
       {/* STRICT 3-ZONE TOP BAR CONTRACT */}
-      <header className="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-stone-200/80 px-4 sm:px-6 lg:px-10 py-3 sm:py-4 flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
+      <header className="sm:sticky sm:top-0 z-30 bg-white/90 backdrop-blur-md border-b border-stone-200/80 px-4 sm:px-6 lg:px-10 py-3 sm:py-4 flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
         {/* Zone 1: Brand Wordmark + Switch to Landing / AI Intake */}
         <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2 min-w-0">
           <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-[#B88B4A] via-[#C86D51] to-[#4A6B53] flex items-center justify-center text-white shadow-xs">
@@ -1474,14 +1509,14 @@ export default function App() {
           <button
             type="button"
             onClick={() => setEntryMode('landing')}
-            className="px-3 py-1.5 text-xs font-semibold text-stone-700 bg-stone-100 hover:bg-stone-200 rounded-xl transition-colors whitespace-nowrap"
+            className="hidden sm:inline-flex px-3 py-1.5 text-xs font-semibold text-stone-700 bg-stone-100 hover:bg-stone-200 rounded-xl transition-colors whitespace-nowrap"
           >
             ← Landing Page
           </button>
           <button
             type="button"
             onClick={() => setEntryMode('chooser')}
-            className="px-3 py-1.5 text-xs font-semibold text-[#4A6B53] bg-[#EDF3EE] hover:bg-[#DFECE1] rounded-xl transition-colors whitespace-nowrap"
+            className="hidden md:inline-flex px-3 py-1.5 text-xs font-semibold text-[#4A6B53] bg-[#EDF3EE] hover:bg-[#DFECE1] rounded-xl transition-colors whitespace-nowrap"
           >
             Plan with AI / Mode Switcher
           </button>
@@ -1866,6 +1901,44 @@ export default function App() {
           {/* VIEW 1: CLEAN BENTO BOX DASHBOARD GRID */}
           {activeTab === 'overview' && (
             <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-stretch">
+              <div className="md:col-span-12">
+                <GettingStartedCard
+                  steps={[
+                    {
+                      id: 'ai',
+                      label: 'Connect your AI (optional)',
+                      hint: 'Paste your own Gemini, Claude, GPT or OpenRouter key for smarter answers.',
+                      done: aiConnected,
+                      action: () => setIsAiSettingsOpen(true),
+                      actionLabel: 'Add key',
+                    },
+                    {
+                      id: 'guests',
+                      label: 'Add your guest list',
+                      hint: 'Track RSVPs, dietary needs and send invites.',
+                      done: eventRsvps.length > 0,
+                      action: () => setActiveTab('theme_rsvps'),
+                      actionLabel: 'Add guests',
+                    },
+                    {
+                      id: 'vendors',
+                      label: 'Check your vendor checklist',
+                      hint: 'See who to book, and by when, for this type of event.',
+                      done: Object.keys(checklistState[currentEvent.id] ?? {}).length > 0 || eventVendors.some((v) => v.status === 'booked'),
+                      action: () => setActiveTab('checklist'),
+                      actionLabel: 'Open',
+                    },
+                    {
+                      id: 'task',
+                      label: 'Complete your first milestone',
+                      hint: 'Tick off a task on the timeline to start tracking progress.',
+                      done: completedTasksCount > 0,
+                      action: () => setActiveTab('timeline'),
+                      actionLabel: 'Open timeline',
+                    },
+                  ]}
+                />
+              </div>
               <div className="md:col-span-12">
                 <ReadinessCard
                   report={readiness}
@@ -2293,6 +2366,7 @@ export default function App() {
               }}
               onAddBudgetItem={handleAddBudgetItem}
               onDeleteBudgetItem={handleDeleteBudgetItem}
+              onUpdateBudgetItem={handleUpdateBudgetItem}
               onUpdateTargetBudget={handleUpdateTargetBudget}
               initialSubView={activeTab === 'forecasting' ? 'forecast' : 'current'}
             />
@@ -2390,6 +2464,10 @@ export default function App() {
               budgetItems={eventBudgetItems}
               tasks={cpmResult.tasks}
               vendors={eventVendors}
+              aiLabel={aiStatusLabel}
+              aiConnected={aiConnected}
+              onOpenAiSettings={() => setIsAiSettingsOpen(true)}
+              onCancel={handleCancelOrchestrate}
               onSendMessage={handleSendOrchestratorMessage}
               onAcceptProposal={handleAcceptProposal}
               onRejectProposal={handleRejectProposal}

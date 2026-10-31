@@ -696,6 +696,7 @@ export const ThemeAndRsvpView: React.FC<ThemeAndRsvpViewProps> = ({
               min={1}
               max={20}
               value={partySize}
+              aria-label="Party size"
               onChange={(e) => setPartySize(e.target.value)}
               className="w-full px-3 py-2 text-xs font-mono bg-white border border-stone-200/90 rounded-xl tabular-nums"
             />
@@ -707,6 +708,7 @@ export const ThemeAndRsvpView: React.FC<ThemeAndRsvpViewProps> = ({
             <input
               type="text"
               value={dietary}
+              aria-label="Dietary notes"
               onChange={(e) => setDietary(e.target.value)}
               className="w-full px-3 py-2 text-xs bg-white border border-stone-200/90 rounded-xl"
             />

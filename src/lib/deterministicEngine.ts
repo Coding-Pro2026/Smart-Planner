@@ -6,6 +6,8 @@ import { BudgetItemRecord, TaskRecord } from '../types/domain';
  * or Directed Acyclic Graph (DAG) Critical Path Method (CPM) task scheduling.
  */
 
+const fmt0 = (n: number) => Math.round(n).toLocaleString('en-US');
+
 export function roundCurrency(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
@@ -138,12 +140,12 @@ export function calculateEventBudget(
   if (totalProjectedSpend > targetBudget) {
     statusLevel = 'CRITICAL_OVER_BUDGET';
     breachAlerts.push(
-      `Projected total ($${totalProjectedSpend.toLocaleString()}) exceeds target budget ($${targetBudget.toLocaleString()}) by $${Math.abs(remainingBudget).toLocaleString()}.`
+      `Projected total ($${fmt0(totalProjectedSpend)}) exceeds target budget ($${fmt0(targetBudget)}) by $${fmt0(Math.abs(remainingBudget))}.`
     );
   } else if (burnRatePct >= 85) {
     statusLevel = 'WARNING_85';
     breachAlerts.push(
-      `Budget utilization is at ${burnRatePct}% ($${remainingBudget.toLocaleString()} buffer remaining).`
+      `Budget utilization is at ${Math.round(burnRatePct)}% ($${fmt0(remainingBudget)} buffer remaining).`
     );
   }
 

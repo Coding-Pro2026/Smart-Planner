@@ -203,12 +203,12 @@ export function buildGenerateRequest(
         },
       ],
     };
-    if (n.system) body.systemInstruction = { parts: [{ text: n.system }] };
+    // The schema goes in the instruction (not `responseSchema`): small Gemini models return truncated/empty
+    // JSON under strict responseSchema but follow an in-prompt JSON Schema reliably (verified live).
+    const system = (n.system + (n.grounding ? '' : jsonInstruction(n))).trim();
+    if (system) body.systemInstruction = { parts: [{ text: system }] };
     const generationConfig: Record<string, unknown> = {};
-    if (n.wantJson) {
-      generationConfig.responseMimeType = 'application/json';
-      if (n.geminiSchema && !n.grounding) generationConfig.responseSchema = n.geminiSchema;
-    }
+    if (n.wantJson && !n.grounding) generationConfig.responseMimeType = 'application/json';
     if (Object.keys(generationConfig).length) body.generationConfig = generationConfig;
     if (n.grounding) body.tools = [{ googleSearch: {} }];
     return {
