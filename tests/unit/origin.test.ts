@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isAllowedRequestOrigin } from "@/lib/http";
+import { describeOriginRejection, isAllowedRequestOrigin } from "@/lib/http";
 
 const h = (o: Record<string, string>) => new Headers(o);
 
@@ -24,5 +24,13 @@ describe("CSRF origin check", () => {
   it("honours ALLOWED_ORIGINS, including for same-site requests", () => {
     expect(isAllowedRequestOrigin(h({ origin: "https://my.app", host: "internal", "sec-fetch-site": "same-site" }), "POST", "https://my.app/, https://other.app")).toBe(true);
     expect(isAllowedRequestOrigin(h({ origin: "https://nope.app", host: "internal", "sec-fetch-site": "same-site" }), "POST", "https://my.app")).toBe(false);
+  });
+
+  it("explains a rejection with the values it saw and how to fix it", () => {
+    const m = describeOriginRejection(h({ origin: "https://tunnel.example.com/path", host: "localhost:3000" }));
+    expect(m).toContain("Origin: https://tunnel.example.com");
+    expect(m).toContain("server host: localhost:3000");
+    expect(m).toContain('ALLOWED_ORIGINS="https://tunnel.example.com"');
+    expect(describeOriginRejection(h({}))).toContain("(none)");
   });
 });
