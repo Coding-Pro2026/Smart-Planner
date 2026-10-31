@@ -201,7 +201,7 @@ function addDaysToIsoDate(baseIsoDate: string, offsetDays: number): string {
 
 export function computeCriticalPath(
   tasks: TaskRecord[],
-  kickoffDate: string = '2026-11-01'
+  kickoffDate: string = new Date().toISOString().slice(0, 10)
 ): CpmScheduleResult {
   if (tasks.length === 0) {
     return {
@@ -365,7 +365,7 @@ export function shiftTaskSchedule(
   tasks: TaskRecord[],
   targetTaskId: string,
   deltaDays: number,
-  kickoffDate: string = '2026-11-01'
+  kickoffDate: string = new Date().toISOString().slice(0, 10)
 ): CpmScheduleResult {
   const firstPass = computeCriticalPath(tasks, kickoffDate);
   const mutated = firstPass.tasks.map((t) => {

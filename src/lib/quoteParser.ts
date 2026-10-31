@@ -43,7 +43,8 @@ export function parseQuoteText(
   raw: string,
   opts: { serviceType?: string } = {}
 ): ParsedVendorTerms {
-  const text = String(raw ?? '');
+  // Cap input: the server already limits to 20k chars; this keeps worst-case regex time bounded.
+  const text = String(raw ?? '').slice(0, 20_000);
   const lower = text.toLowerCase();
   const amounts = findAmounts(text);
 

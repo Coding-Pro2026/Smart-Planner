@@ -138,7 +138,16 @@ function loadWorkspace(): SavedWorkspace | null {
           isValidIsoDate(e.kickoff_date) &&
           Number.isFinite(e.guest_count) &&
           Number.isFinite(e.target_budget)
-      )
+      ).map((e) => ({
+        ...e,
+        // Fill optional-looking-but-required text fields so one bad record can't crash the UI.
+        event_type: typeof e.event_type === 'string' && e.event_type ? e.event_type : 'community',
+        location: typeof e.location === 'string' ? e.location : '',
+        currency: typeof e.currency === 'string' && e.currency ? e.currency : 'USD',
+        owner_id: typeof e.owner_id === 'string' ? e.owner_id : 'usr_primary_01',
+        guest_count: Math.max(1, Math.round(e.guest_count)),
+        target_budget: Math.max(0, e.target_budget),
+      }))
     : [];
   if (events.length === 0) return null;
   const list = <T,>(v: unknown, fallback: T[]): T[] => (isArr(v) ? (v as T[]) : fallback);
@@ -634,6 +643,18 @@ export default function App() {
     if (!Number.isFinite(deltaDays) || deltaDays === 0) return false;
     try {
       const shifted = shiftTaskSchedule(current, taskId, deltaDays, currentEvent.kickoff_date);
+      const before = computeCriticalPath(current, currentEvent.kickoff_date).tasks.find((t) => t.id === taskId);
+      const after = shifted.tasks.find((t) => t.id === taskId);
+      if (deltaDays < 0 && before && after && after.early_start === before.early_start) {
+        // The engine cannot start a task before its prerequisites finish (or before kickoff).
+        pushToast(
+          'info',
+          `"${target.title}" can't start any earlier — it has to wait for ${
+            target.dependencies.length ? 'its prerequisite tasks to finish' : 'the plan kickoff date'
+          }.`
+        );
+        return false;
+      }
       commitEventTasks(currentEvent.id, shifted.tasks);
     } catch (err) {
       pushToast('error', err instanceof Error ? err.message : 'Could not reschedule that task.');

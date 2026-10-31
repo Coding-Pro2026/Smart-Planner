@@ -1602,11 +1602,12 @@ export function buildEventSpecificInitialBudgetAndTasks(params: {
     eventId,
     eventType,
     location,
-    guestCount,
-    targetBudget,
-    eventDays,
-    kickoffDate = '2026-11-01',
+    kickoffDate = new Date().toISOString().slice(0, 10),
   } = params;
+  // Never let a NaN / zero / negative input poison the generated budget lines.
+  const guestCount = Math.max(1, Math.round(Number(params.guestCount)) || 1);
+  const targetBudget = Math.max(0, Number(params.targetBudget) || 0);
+  const eventDays = Math.max(1, Math.round(Number(params.eventDays)) || 1);
 
   const combined = `${eventType} ${location}`.toLowerCase();
   const isFuneral =
