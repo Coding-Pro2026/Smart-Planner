@@ -23,7 +23,6 @@ interface AgentOrchestratorPanelProps {
   budgetItems: BudgetItemRecord[];
   tasks: TaskRecord[];
   vendors: VendorRecord[];
-  fastModel: string;
   onSendMessage: (userPrompt: string) => Promise<void>;
   onAcceptProposal: (messageId: string, actions: ProposedToolAction[]) => void;
   onRejectProposal: (messageId: string) => void;

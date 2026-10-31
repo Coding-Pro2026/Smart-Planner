@@ -3,6 +3,8 @@
  * guaranteed-typed result so UI code never has to wrap fetch in try/catch.
  */
 
+import { AI_WARNING_EVENT, aiHeaders } from './aiConfig';
+
 export type ApiResult<T> =
   | { ok: true; data: T }
   | { ok: false; error: string; status?: number };
@@ -34,7 +36,15 @@ async function requestJson<T>(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), init.timeoutMs ?? 45_000);
   try {
-    const res = await fetch(url, { ...init, signal: controller.signal });
+    // BYOK: attach the user's own AI settings to AI endpoints only (never to other requests).
+    const headers = url.startsWith('/api/agents/')
+      ? { ...(init.headers as Record<string, string> | undefined), ...aiHeaders() }
+      : init.headers;
+    const res = await fetch(url, { ...init, headers, signal: controller.signal });
+    const fallback = res.headers.get('x-ai-fallback');
+    if (fallback) {
+      window.dispatchEvent(new CustomEvent(AI_WARNING_EVENT, { detail: fallback }));
+    }
     const text = await res.text();
     let data: unknown = null;
     try {

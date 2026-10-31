@@ -22,6 +22,9 @@ import { buildLocalAssistantReply } from '../lib/localAssistant';
 import { generateIdeas } from '../lib/ideas';
 import { generateMoodboard } from '../lib/moodboardGenerator';
 import { safeHttpUrl } from '../lib/url';
+import { buildGoogleCalendarTemplateUrl, isValidGoogleClientId } from '../lib/googleCalendarRsvp';
+import { isValidMapsKey, osmEmbedUrl } from '../lib/mapsConfig';
+import { haversineMiles } from '../server/geo';
 
 export interface SecurityAuditCheckResult {
   id: string;
@@ -501,6 +504,24 @@ export function runAllVerificationSuites(): FullVerificationReport {
     }
     if (!safeHttpUrl('https://www.google.com/travel/hotels?q=a')) throw new Error('Rejected a valid https URL');
     return 'Only well-formed http(s) URLs reach <a href>; script/data/protocol-relative URLs are dropped.';
+  });
+
+  // 20. Key-free Google Calendar + OpenStreetMap helpers
+  runCheck('chk_calendar_maps', 'FEATURE_LOGIC', 'Google Calendar Template Link, OAuth Client-ID Validation & OSM Embed Helpers', () => {
+    const emails = Array.from({ length: 400 }, (_, i) => `guest${i}@example.com`);
+    const r = buildGoogleCalendarTemplateUrl({ title: 'A & B', date: '2027-05-15', location: 'Napa, CA', event_days: 2, event_type: 'wedding' }, ['x@y.com', 'not-an-email']);
+    const u = new URL(r.url);
+    if (u.origin + u.pathname !== 'https://calendar.google.com/calendar/render') throw new Error('Wrong Google Calendar endpoint');
+    if (u.searchParams.get('action') !== 'TEMPLATE' || u.searchParams.get('dates') !== '20270515/20270517') throw new Error('Wrong dates/action');
+    if (u.searchParams.get('text') !== 'A & B' || u.searchParams.get('add') !== 'x@y.com') throw new Error('Title/guests not encoded correctly');
+    const big = buildGoogleCalendarTemplateUrl({ title: 'T', date: '2027-05-15', location: 'L', event_days: 1, event_type: 'x' }, emails);
+    if (big.url.length > 2000 || !big.truncated || big.includedGuests < 10) throw new Error('Long guest lists must be truncated under the URL limit');
+    if (!isValidGoogleClientId('1234567890-abc123def.apps.googleusercontent.com') || isValidGoogleClientId('GOCSPX-secretvalue') || isValidGoogleClientId('<script>')) throw new Error('Client-ID validation wrong');
+    if (isValidMapsKey('short') || !isValidMapsKey('AIzaSyA1234567890abcdefghijklmnopqrstu')) throw new Error('Maps key validation wrong');
+    if (!osmEmbedUrl(38.3, -122.3).startsWith('https://www.openstreetmap.org/export/embed.html?bbox=') ) throw new Error('OSM embed URL wrong');
+    const d = haversineMiles(40.7128, -74.006, 34.0522, -118.2437);
+    if (Math.abs(d - 2445) > 15) throw new Error(`Haversine off: ${d}`);
+    return 'Calendar link needs no key, encodes safely, caps guests under the URL limit; client IDs / Maps keys validated; OSM embed + distances correct.';
   });
 
   const passedChecks = checks.filter((c) => c.passed).length;

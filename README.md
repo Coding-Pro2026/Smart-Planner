@@ -11,17 +11,35 @@ bun install        # or: npm install
 npm run dev        # http://localhost:3000
 ```
 
-No keys are required: every AI feature has a deterministic offline engine. Add keys only to upgrade it.
+No keys are required: every AI feature has a deterministic offline engine.
 
-```bash
-cp .env.example .env   # then set GEMINI_API_KEY to enable Gemini
-```
+### Bring your own AI key (BYOK)
+Click the **🔑 key button** (header, or bottom-left on the landing/intake screens), choose **Gemini, Claude, GPT,
+OpenRouter or Custom (any OpenAI-compatible endpoint: Groq, Together, Mistral, DeepSeek, vLLM, LM Studio, Ollama…)**,
+paste your key, click **Load my models** to pick from your provider's real model list, **Test connection**, **Save**.
+That's it — the assistant, intake chat, Idea Studio, quote analyzer and moodboard all switch to your model.
+Keys live in your browser (session-only unless you tick "Remember on this device"), travel over HTTPS to the server only
+for your requests, and are never stored or logged. If your key fails, you're told and the built-in engine answers instead.
+
+Optional server-side default (so visitors don't have to bring a key): set `GEMINI_API_KEY`, or `AI_PROVIDER` +
+`AI_API_KEY` (+ `AI_MODEL`, `AI_BASE_URL`) in `.env`.
+
+### Google Calendar without any API keys from us
+- **Add to Google Calendar** opens Google's own pre-filled event editor with your guests — no sign-in or API.
+- **.ics download** and **email (BCC)** invitations work with any calendar/mail app.
+- **Optional two-way RSVP sync:** create your own free OAuth *Web* client in Google Cloud (steps shown in-app), paste the
+  Client ID, and PlanGenie reads guests' Yes/No answers straight from your calendar. Token stays in memory.
+
+### Maps
+OpenStreetMap by default (keyless, attributed). Prefer Google's map? Paste *your own* Maps JavaScript API key in the map card.
+Hotels are real OpenStreetMap listings with links to live rates — prices are never invented.
 
 | Variable | Purpose |
 |---|---|
-| `GEMINI_API_KEY` | Enables Gemini for the assistant, intake chat, idea studio, quote analyzer, moodboard & hotel grounding. Automatic fallback to the local engine on any error/quota/timeout. |
-| `GEMINI_MODEL_FAST` / `_LITE` / `_REASONING` | Override model ids (defaults: `gemini-2.5-flash`, `gemini-2.5-flash-lite`). |
-| `VITE_GOOGLE_MAPS_API_KEY` | Optional interactive Maps SDK (keyless embed otherwise). |
+| `GEMINI_API_KEY` / `AI_PROVIDER`, `AI_API_KEY`, `AI_MODEL`, `AI_BASE_URL` | Optional **server-side default** AI (users can still bring their own). Automatic fallback to the local engine on any error. |
+| `ALLOW_PRIVATE_AI_URLS` | `true` only on your own machine, to let a custom endpoint point at localhost (Ollama/LM Studio). Never in production. |
+| `NOMINATIM_CONTACT` | Email/URL put in the OpenStreetMap User-Agent (required by their usage policy). |
+| `VITE_GOOGLE_MAPS_API_KEY` | Optional build-time Google Maps key (users can also paste their own in the UI). |
 | `PORT`, `RATE_LIMIT_PER_MIN` | Server port (3000) and per-IP AI request limit (90/min). |
 
 ## Features
@@ -43,7 +61,7 @@ cp .env.example .env   # then set GEMINI_API_KEY to enable Gemini
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # 19 verification checks (math, DAG, crypto, parsers, exports…)
+npm test            # 20 app checks + 17 BYOK/SSRF checks
 npm run build       # production bundle
 npm run verify      # all of the above
 ```
@@ -73,6 +91,7 @@ is per-instance.
 - No secrets in source; `.env*` is git-ignored; no key material is hard-coded (random per-process key if none configured).
 - Strict CSP + HSTS in production, nosniff, frame and permissions policies; `X-Powered-By` removed.
 - Request bodies capped (256 KB; 8 MB only for the moodboard image); per-IP rate limit on `/api`.
+- BYOK: custom endpoints are SSRF-guarded (https only, every resolved IP checked at connect time, no redirects); keys are never stored or logged. See `docs/AUDIT.md`.
 - All LLM output is schema-validated and clamped; third-party URLs are restricted to `http(s)`; the UI never uses `innerHTML`.
 - Prompt input is sanitised against injection; the LLM only *proposes* actions that the user must accept.
 - Client-supplied tenant headers are ignored unless `TRUST_TENANT_HEADER=true` behind an authenticating gateway.

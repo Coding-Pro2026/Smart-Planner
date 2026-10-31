@@ -55,7 +55,6 @@ import {
   EventType,
   GuestRsvpRecord,
   HotelRoomBlockRecord,
-  ModelRoutingConfig,
   MoodboardPalette,
   ProposedToolAction,
   RsvpStatus,
@@ -81,6 +80,9 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToastStack, ToastMessage } from './components/ToastStack';
 import { ReadinessCard } from './components/ReadinessCard';
 import { ExportMenu } from './components/ExportMenu';
+import { AiSettingsModal } from './components/AiSettingsModal';
+import { AI_CONFIG_EVENT, AI_WARNING_EVENT, aiLabel, isAiConfigured, loadAiConfig } from './lib/aiConfig';
+import { KeyRound } from 'lucide-react';
 import { VendorChecklistView } from './components/VendorChecklistView';
 import { IdeaStudioView } from './components/IdeaStudioView';
 import { addDaysIso, diffDays, isValidIsoDate, todayIso } from './lib/dates';
@@ -365,17 +367,34 @@ export default function App() {
     Record<string, Record<string, number>>
   >({});
 
-  // Server Model Routing & Security Audit Modal State
-  const [routingConfig, setRoutingConfig] = useState<ModelRoutingConfig>({
-    fastTaskProfile: 'gemini-3.8-flash',
-    reasoningVisionProfile: 'gemini-3.8-flash',
-    encryptionMode: 'aes_256_gcm_vault',
-    strictDeterministicMath: true,
-    autoCascadeDependencies: true,
-  });
+  // Security Audit Modal State
   const [isSecurityModalOpen, setIsSecurityModalOpen] = useState(false);
   const [isNewEventModalOpen, setIsNewEventModalOpen] = useState(false);
   const [isOrchestrating, setIsOrchestrating] = useState(false);
+  const [isAiSettingsOpen, setIsAiSettingsOpen] = useState(false);
+  const [aiStatusLabel, setAiStatusLabel] = useState<string>(() => aiLabel());
+  const [aiConnected, setAiConnected] = useState<boolean>(() => isAiConfigured());
+
+  // Keep the header chip in sync with AI settings; surface "your key failed, used built-in engine" once.
+  useEffect(() => {
+    const sync = () => {
+      const c = loadAiConfig();
+      setAiStatusLabel(aiLabel(c));
+      setAiConnected(isAiConfigured(c));
+    };
+    let lastWarn = 0;
+    const onWarn = (e: Event) => {
+      if (Date.now() - lastWarn < 15_000) return;
+      lastWarn = Date.now();
+      pushToast('error', `Your AI provider returned an error, so the built-in engine answered instead: ${String((e as CustomEvent).detail).slice(0, 140)}`);
+    };
+    window.addEventListener(AI_CONFIG_EVENT, sync);
+    window.addEventListener(AI_WARNING_EVENT, onWarn);
+    return () => {
+      window.removeEventListener(AI_CONFIG_EVENT, sync);
+      window.removeEventListener(AI_WARNING_EVENT, onWarn);
+    };
+  }, [pushToast]);
 
   // Escape closes the "new event" dialog
   useEffect(() => {
@@ -928,7 +947,6 @@ export default function App() {
         proposed_actions?: ProposedToolAction[];
       }>('/api/agents/orchestrate', {
         prompt: userPrompt,
-        fastModel: routingConfig.fastTaskProfile,
         eventContext: currentEvent,
         budgetSummary: {
           totalProjectedSpend: budgetResult.totalProjectedSpend,
@@ -1068,12 +1086,6 @@ export default function App() {
     setChatMessages((prev) =>
       prev.map((m) => (m.id === messageId ? { ...m, proposal_status: 'rejected' } : m))
     );
-  };
-
-  const handleUpdateRoutingConfig = async (next: ModelRoutingConfig) => {
-    setRoutingConfig(next);
-    const res = await postJson('/api/vault/routing', next);
-    if (!res.ok) pushToast('error', `Could not save routing profile: ${res.error}`);
   };
 
   // Handler when user finishes "Plan with AI" chat and clicks "Enter Workspace with Custom Tabs"
@@ -1338,9 +1350,32 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  // Shared overlays for every screen: AI settings dialog, toasts and (outside the workspace) a key chip.
+  const aiOverlays = (showChip: boolean) => (
+    <>
+      {showChip && (
+        <button
+          type="button"
+          onClick={() => setIsAiSettingsOpen(true)}
+          className={`fixed bottom-5 left-5 z-40 inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold rounded-full shadow-lg border transition-colors ${
+            aiConnected
+              ? 'bg-white text-[#3b5943] border-[#b7d0be]'
+              : 'bg-amber-50 text-amber-900 border-amber-200 hover:bg-amber-100'
+          }`}
+        >
+          <KeyRound className="w-3.5 h-3.5" />
+          {aiStatusLabel}
+        </button>
+      )}
+      <AiSettingsModal isOpen={isAiSettingsOpen} onClose={() => setIsAiSettingsOpen(false)} onToast={pushToast} />
+      <ToastStack toasts={toasts} onDismiss={dismissToast} />
+    </>
+  );
+
   // Render Flagship Product Landing Page with Interactive Video Reel & Animations
   if (entryMode === 'landing') {
     return (
+      <>
       <ProductLandingPageView
         existingEvents={events}
         isDarkMode={isDarkMode}
@@ -1359,12 +1394,15 @@ export default function App() {
         }}
         onOpenChooser={() => setEntryMode('chooser')}
       />
+      {aiOverlays(true)}
+      </>
     );
   }
 
   // Render "Plan with AI" vs "Plan Without AI" Start Screen or Standard AI Chat Intake
   if (entryMode === 'chooser' || entryMode === 'ai_chat_intake') {
     return (
+      <>
       <EntryModeAndAiIntakeView
         mode={entryMode}
         existingEvents={events}
@@ -1380,6 +1418,8 @@ export default function App() {
         onOpenManualNewEventModal={() => setIsNewEventModalOpen(true)}
         onCompleteAiEventSetup={handleCompleteAiEventSetup}
       />
+      {aiOverlays(true)}
+      </>
     );
   }
 
@@ -1511,6 +1551,18 @@ export default function App() {
                 Dark
               </>
             )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsAiSettingsOpen(true)}
+            title="Bring your own AI key"
+            className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl transition-colors whitespace-nowrap ${
+              aiConnected ? 'text-[#3b5943] bg-[#EDF3EE] hover:bg-[#DFECE1]' : 'text-amber-800 bg-amber-50 hover:bg-amber-100'
+            }`}
+          >
+            <KeyRound className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">{aiStatusLabel}</span>
           </button>
 
           <button
@@ -1683,7 +1735,7 @@ export default function App() {
               className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-xl bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-200/60 transition-colors whitespace-nowrap shrink-0"
             >
               <Building2 className="w-3.5 h-3.5 shrink-0" />
-              Nearby Cheap Hotels ({eventHotelBlocks.length})
+              Nearby Hotels ({eventHotelBlocks.length})
             </button>
 
             <button
@@ -1872,13 +1924,13 @@ export default function App() {
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <span className="text-xs font-bold text-emerald-700">
-                        Live Online Hotel Deals &amp; Blocks
+                        Nearby Hotels &amp; Room Blocks
                       </span>
                       <h2 className="text-lg font-bold text-stone-900 mt-1">
                         Nearby Hotels in {currentEvent.location.split('—')[0].trim()}
                       </h2>
                       <p className="text-xs text-stone-500 mt-0.5">
-                        Affordable group room blocks &amp; live online hotel search
+                        Real nearby hotels (OpenStreetMap) &amp; group room blocks
                       </p>
                     </div>
                     <span className="font-mono text-xs font-bold text-stone-900 tabular-nums">
@@ -1919,7 +1971,7 @@ export default function App() {
                   onClick={() => setActiveTab('custom_hotels')}
                   className="w-full py-3 px-4 text-xs font-semibold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 rounded-2xl transition-all inline-flex items-center justify-center gap-1.5 shadow-xs"
                 >
-                  Search Cheap Nearby Hotels Online &amp; Manage Blocks{' '}
+                  Find Nearby Hotels &amp; Manage Room Blocks{' '}
                   <ArrowRight className="w-3.5 h-3.5" />
                 </button>
               </div>
@@ -2143,9 +2195,9 @@ export default function App() {
                       : '1.2 mi from venue',
                     star_rating: 4.5 - (idx % 2) * 0.2,
                     price_per_night: hb.nightly_rate,
-                    original_retail_price: Math.round(hb.nightly_rate * 1.25),
-                    savings_pct: 20,
-                    tier_label: 'Group Block Favorite' as const,
+                    original_retail_price: 0,
+                    savings_pct: 0,
+                    tier_label: 'Your Room Block' as const,
                     amenities: [hb.room_type, `Code: ${hb.group_code}`],
                     booking_url: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
                       `${hb.hotel_name} ${currentEvent.location}`
@@ -2309,7 +2361,6 @@ export default function App() {
               budgetItems={eventBudgetItems}
               tasks={cpmResult.tasks}
               vendors={eventVendors}
-              fastModel={routingConfig.fastTaskProfile}
               onSendMessage={handleSendOrchestratorMessage}
               onAcceptProposal={handleAcceptProposal}
               onRejectProposal={handleRejectProposal}
@@ -2322,7 +2373,7 @@ export default function App() {
       {/* QUIET FOOTER WITH OPTIONAL ARCHITECTURE & SECURITY LINKS */}
       <footer className="bg-white border-t border-stone-200/80 px-6 lg:px-10 py-5 mt-12">
         <div className="max-w-[1440px] mx-auto flex flex-wrap items-center justify-between gap-4 text-xs text-stone-500">
-          <div>PlanGenie — Smart Event Planning, Custom Cultural Tabs &amp; Live Hotel Deals</div>
+          <div>PlanGenie — Smart Event Planning, Custom Cultural Tabs &amp; Nearby Hotels</div>
           <div className="flex items-center gap-6">
             <button
               onClick={() => setActiveTab('architecture')}
@@ -2353,8 +2404,8 @@ export default function App() {
       <SecurityAuditModal
         isOpen={isSecurityModalOpen}
         onClose={() => setIsSecurityModalOpen(false)}
-        routingConfig={routingConfig}
-        onUpdateRoutingConfig={handleUpdateRoutingConfig}
+        aiStatusLabel={aiStatusLabel}
+        onOpenAiSettings={() => setIsAiSettingsOpen(true)}
       />
 
       {/* CREATE NEW EVENT MODAL (Supports Funeral, 5-Day Indian Wedding, USA Wedding, Birthday, or Any Custom Event Type) */}
@@ -2643,7 +2694,7 @@ export default function App() {
           </div>
         </div>
       )}
-      <ToastStack toasts={toasts} onDismiss={dismissToast} />
+      {aiOverlays(false)}
     </div>
   );
 }

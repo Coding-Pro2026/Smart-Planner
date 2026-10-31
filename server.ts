@@ -2,7 +2,7 @@ import express, { Request, Response } from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { GoogleGenAI, Type } from '@google/genai';
+import { Type } from './src/lib/llm/schemaType';
 import {
   decryptSecretEnvelope,
   encryptSecretEnvelope,
@@ -31,60 +31,51 @@ import { parseQuoteText } from './src/lib/quoteParser';
 import { generateMoodboard } from './src/lib/moodboardGenerator';
 import { isValidIsoDate } from './src/lib/dates';
 import { safeHttpUrl } from './src/lib/url';
+import { geocode, findHotelsNear } from './src/server/geo';
+import { AiClient, createAiClient, listModels, resolveAiConfig, testConnection, validateAiConfig } from './src/server/aiClient';
+import { extractJson, isProviderId, redactSecret } from './src/lib/llm/providers';
 
 dotenv.config();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3000;
 
-/** Real keys are long, and never the template placeholder from .env.example. */
-function isConfiguredGeminiKey(key?: string): boolean {
-  if (!key) return false;
-  const k = key.trim();
-  return k.length >= 20 && !/YOUR_|PLACEHOLDER|REPLACE|XXXX|<.*>/i.test(k);
+class HttpError extends Error {
+  constructor(public status: number, message: string) {
+    super(message);
+  }
 }
 
-let cachedClient: GoogleGenAI | null = null;
-let geminiCooldownUntil = 0;
+let envCooldownUntil = 0;
 
 /**
- * Returns a Gemini client when a valid GEMINI_API_KEY is present, otherwise null
- * (the app then runs entirely on its deterministic local engine). After an
- * upstream failure the client is paused briefly so a bad key / quota error does
- * not add latency to every request.
+ * Resolves the AI client for THIS request: the user's own key (BYOK headers) first, otherwise an
+ * optional server-side key from the environment, otherwise null => deterministic local engine.
+ * An invalid BYOK config is a 400 (never silently ignored).
  */
-function createGeminiClient(): GoogleGenAI | null {
-  const key = process.env.GEMINI_API_KEY;
-  if (!isConfiguredGeminiKey(key)) return null;
-  if (Date.now() < geminiCooldownUntil) return null;
+function getAi(req: Request): AiClient | null {
+  let resolved: ReturnType<typeof resolveAiConfig>;
   try {
-    cachedClient ??= new GoogleGenAI({ apiKey: key!.trim() });
-    return cachedClient;
+    resolved = resolveAiConfig(req);
   } catch (err) {
-    console.warn('[gemini] client init failed:', err instanceof Error ? err.message : err);
-    return null;
+    throw new HttpError(400, err instanceof Error ? err.message : 'Invalid AI configuration');
   }
+  if (!resolved) return null;
+  if (!resolved.userSupplied && Date.now() < envCooldownUntil) return null;
+  return createAiClient(resolved.config, resolved.userSupplied);
 }
 
-function noteGeminiFailure(context: string, err: unknown): void {
-  const msg = err instanceof Error ? err.message : String(err);
-  console.warn(`[gemini] ${context} failed, using local engine: ${redactSensitiveStrings(msg).slice(0, 200)}`);
-  // Pause only on auth/quota-type errors; transient errors retry on the next call.
-  if (/api key|permission|unauthor|quota|exhaust|429|403|401/i.test(msg)) {
-    geminiCooldownUntil = Date.now() + 60_000;
+/** Records an AI failure. Users who supplied their own key are told why we fell back. */
+function noteAiFailure(context: string, err: unknown, ai: AiClient | null, res: Response): void {
+  const msg = redactSensitiveStrings(err instanceof Error ? err.message : String(err));
+  console.warn(`[ai] ${context} failed (${ai?.provider ?? 'n/a'}), using local engine: ${msg.slice(0, 160)}`);
+  if (ai?.userSupplied) {
+    if (!res.headersSent) {
+      res.setHeader('X-AI-Fallback', msg.replace(/[^\x20-\x7e]/g, ' ').slice(0, 160));
+    }
+  } else if (/api key|permission|unauthor|quota|exhaust|429|403|401/i.test(msg)) {
+    envCooldownUntil = Date.now() + 60_000;
   }
-}
-
-/** Real Gemini model ids; override per environment without touching code. */
-const MODELS = {
-  fast: process.env.GEMINI_MODEL_FAST || 'gemini-2.5-flash',
-  lite: process.env.GEMINI_MODEL_LITE || 'gemini-2.5-flash-lite',
-  reasoning: process.env.GEMINI_MODEL_REASONING || 'gemini-2.5-flash',
-};
-
-/** Maps the UI routing profile to a real model id. */
-function resolveFastModel(profile: unknown): string {
-  return profile === 'gemini-3.1-flash-lite' ? MODELS.lite : MODELS.fast;
 }
 
 /** Runs a Gemini call with a hard timeout so a hung upstream never hangs a request. */
@@ -104,8 +95,7 @@ async function withTimeout<T>(p: Promise<T>, ms = 30_000): Promise<T> {
 
 /** Parses model JSON output, tolerating accidental code fences. */
 function parseModelJson(text: string | undefined): any {
-  const t = (text ?? '{}').trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '');
-  return JSON.parse(t || '{}');
+  return JSON.parse(extractJson(text ?? '{}') || '{}');
 }
 
 // Server-side encrypted routing vault store (keyed by tenantId)
@@ -154,13 +144,13 @@ async function startServer() {
   // Security headers. The CSP only allows the third-party origins the UI actually uses.
   const csp = [
     "default-src 'self'",
-    "script-src 'self' https://maps.googleapis.com",
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "script-src 'self' https://maps.googleapis.com https://accounts.google.com",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com",
     "font-src 'self' https://fonts.gstatic.com data:",
     "img-src 'self' data: blob: https:",
     "media-src 'self' https://assets.mixkit.co",
-    "connect-src 'self' https://maps.googleapis.com",
-    "frame-src https://www.google.com",
+    "connect-src 'self' https://maps.googleapis.com https://www.googleapis.com https://accounts.google.com",
+    "frame-src https://www.openstreetmap.org https://accounts.google.com",
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",
@@ -171,7 +161,8 @@ async function startServer() {
     res.setHeader('X-Frame-Options', 'SAMEORIGIN');
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
     res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
-    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+    // allow-popups: required for Google sign-in popups to message back
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
     if (isProd) {
       // CSP is enforced in production only: the Vite dev server injects inline scripts for HMR.
       res.setHeader('Content-Security-Policy', csp);
@@ -225,8 +216,16 @@ async function startServer() {
     res.json({
       ok: true,
       time: new Date().toISOString(),
-      ai: isConfiguredGeminiKey(process.env.GEMINI_API_KEY) ? 'gemini' : 'local-engine',
-      models: MODELS,
+      // Users bring their own key (BYOK) per request; this only reports an optional server-side default.
+      byok: true,
+      serverDefaultAi: (() => {
+        try {
+          const r = resolveAiConfig({ headers: {} } as Request);
+          return r ? `${r.config.provider}:${r.config.model}` : null;
+        } catch {
+          return null;
+        }
+      })(),
     });
   });
 
@@ -254,45 +253,9 @@ async function startServer() {
       cipherSuite: 'AES-256-GCM (12B IV, 16B AuthTag, HKDF-SHA256)',
       hasEncryptedEnvelope: Boolean(envelope),
       envelopePreview: envelope ? 'aes-256-gcm:v1:••••••••' : null,
-      serverGeminiConfigured: isConfiguredGeminiKey(process.env.GEMINI_API_KEY),
+      serverGeminiConfigured: Boolean(process.env.GEMINI_API_KEY || process.env.AI_API_KEY),
       routingConfig,
     });
-  });
-
-  // 2. Update Model Routing Profile in AES-256-GCM Vault
-  app.post('/api/vault/routing', (req: Request, res: Response) => {
-    try {
-      const tenantId = getTenantId(req);
-      const { fastTaskProfile, reasoningVisionProfile, encryptionMode } = req.body ?? {};
-      const FAST = ['gemini-3.8-flash', 'gemini-3.1-flash-lite'];
-      const MODES = ['session_memory', 'aes_256_gcm_vault'];
-      if (
-        (fastTaskProfile !== undefined && !FAST.includes(fastTaskProfile)) ||
-        (reasoningVisionProfile !== undefined && reasoningVisionProfile !== 'gemini-3.8-flash') ||
-        (encryptionMode !== undefined && !MODES.includes(encryptionMode))
-      ) {
-        return res.status(400).json({ error: 'Unsupported routing profile.' });
-      }
-      const payload = JSON.stringify({
-        fastTaskProfile: fastTaskProfile || 'gemini-3.8-flash',
-        reasoningVisionProfile: reasoningVisionProfile || 'gemini-3.8-flash',
-        encryptionMode: encryptionMode || 'aes_256_gcm_vault',
-        updatedAt: new Date().toISOString(),
-      });
-      const encrypted = encryptSecretEnvelope(payload, tenantId);
-      tenantEncryptedVault.set(tenantId, encrypted);
-
-      res.json({
-        ok: true,
-        tenantId,
-        envelopePreview: 'aes-256-gcm:v1:••••••••',
-        routingConfig: JSON.parse(payload),
-      });
-    } catch (err) {
-      res.status(400).json({
-        error: err instanceof Error ? err.message : 'Failed to update routing vault',
-      });
-    }
   });
 
   // 3. Automated Post-Production Security & Unit Verification Endpoint
@@ -309,7 +272,6 @@ async function startServer() {
       budgetSummary,
       tasksSummary,
       vendorsSummary,
-      fastModel = 'gemini-3.8-flash',
     } = req.body ?? {};
 
     if (typeof prompt !== 'string' || prompt.trim().length === 0) {
@@ -319,10 +281,10 @@ async function startServer() {
     const cleanPrompt = sanitization.sanitizedText;
     const checkpointId = `ckpt_${Date.now().toString(36)}`;
 
-    const ai = createGeminiClient();
+    const ai = getAi(req);
     if (ai) {
       try {
-        const modelToUse = resolveFastModel(fastModel);
+        const modelToUse = ai.model;
 
         const response = await withTimeout(ai.models.generateContent({
           model: modelToUse,
@@ -410,11 +372,11 @@ IMPORTANT ARCHITECTURE RULE:
           checkpoint_id: checkpointId,
           sanitizationWarnings: sanitization.warnings,
           proposed_actions: actions,
-          engine: 'gemini',
+          engine: ai.provider,
         });
         return;
       } catch (err) {
-        noteGeminiFailure('orchestrate', err);
+        noteAiFailure('orchestrate', err, ai, res);
         // Fall through to deterministic multi-agent synthesis if quota/network error occurs
       }
     }
@@ -445,11 +407,11 @@ IMPORTANT ARCHITECTURE RULE:
     }
     const sanitized = sanitizeUntrustedInput(rawQuoteText.slice(0, 20_000));
 
-    const ai = createGeminiClient();
+    const ai = getAi(req);
     if (ai && sanitized.sanitizedText.trim().length > 10) {
       try {
         const response = await withTimeout(ai.models.generateContent({
-          model: MODELS.reasoning,
+          model: ai.model,
           contents: `Extract structured financial and legal risk terms from this vendor quote:
 Vendor: ${vendorName || 'Prospective Vendor'}
 Service: ${serviceType || 'Event Services'}
@@ -552,7 +514,7 @@ ${sanitized.sanitizedText}`,
         });
         return;
       } catch (err) {
-        noteGeminiFailure('parse-quote', err);
+        noteAiFailure('parse-quote', err, ai, res);
         // Fall through to deterministic parser
       }
     }
@@ -583,25 +545,25 @@ ${sanitized.sanitizedText}`,
     const { prompt, imageBase64, mimeType, eventId } = req.body ?? {};
     const cleanPrompt = sanitizeUntrustedInput(String(prompt ?? '')).sanitizedText;
 
-    const ai = createGeminiClient();
+    const ai = getAi(req);
     if (ai) {
       try {
         const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [];
         if (imageBase64 && typeof imageBase64 === 'string') {
           const base64Data = imageBase64.includes(',') ? imageBase64.split(',')[1] : imageBase64;
-          parts.push({
-            inlineData: {
-              mimeType: mimeType || 'image/jpeg',
-              data: base64Data,
-            },
-          });
+          const dataUrlMime = imageBase64.match(/^data:(image\/[a-z+.-]+);base64,/i)?.[1];
+          const mime = String(dataUrlMime || mimeType || 'image/jpeg').toLowerCase();
+          // Only real image types and plain base64 are forwarded to the provider.
+          if (['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(mime) && /^[A-Za-z0-9+/=\s]+$/.test(base64Data)) {
+            parts.push({ inlineData: { mimeType: mime, data: base64Data.replace(/\s+/g, '') } });
+          }
         }
         parts.push({
           text: `Decompose this event mood board / creative direction into a structured luxury event design palette. Creative brief: "${cleanPrompt}"`,
         });
 
         const response = await withTimeout(ai.models.generateContent({
-          model: MODELS.reasoning,
+          model: ai.model,
           contents: { parts },
           config: {
             systemInstruction:
@@ -663,7 +625,7 @@ ${sanitized.sanitizedText}`,
         res.json(palette);
         return;
       } catch (err) {
-        noteGeminiFailure('analyze-moodboard', err);
+        noteAiFailure('analyze-moodboard', err, ai, res);
         // Fall through to deterministic moodboard decomposition
       }
     }
@@ -734,11 +696,11 @@ ${sanitized.sanitizedText}`,
           step_4_sub_category_mapping: `Synthesizing nuanced sub-categories: (1) Speaking & Toast Order (Who Speaks First), and (2) ${parsedDays}-Day Regional Run-of-Show & Ritual Checklist.`,
         };
 
-    const ai = createGeminiClient();
+    const ai = getAi(req);
     if (ai) {
       try {
         const response = await withTimeout(ai.models.generateContent({
-          model: MODELS.fast,
+          model: ai.model,
           contents: `Use explicit Chain-of-Thought (CoT) reasoning to analyze this event and build specific, nuanced sub-categories and ritual checklists BEFORE returning the final modules:
 - Event Type: "${cleanType}"
 - Location / Region: "${cleanLocation}"
@@ -914,7 +876,7 @@ CHAIN-OF-THOUGHT INSTRUCTIONS (Complete "chain_of_thought_analysis" FIRST):
           return;
         }
       } catch (err) {
-        noteGeminiFailure('generate-custom-modules', err);
+        noteAiFailure('generate-custom-modules', err, ai, res);
         // Fall through to deterministic cultural/location generator
       }
     }
@@ -963,7 +925,7 @@ CHAIN-OF-THOUGHT INSTRUCTIONS (Complete "chain_of_thought_analysis" FIRST):
     const detectedTitle = parsedIntake.title;
     const detectedDate = parsedIntake.date;
 
-    const ai = createGeminiClient();
+    const ai = getAi(req);
     if (ai) {
       try {
         const historyText = Array.isArray(conversationHistory)
@@ -974,7 +936,7 @@ CHAIN-OF-THOUGHT INSTRUCTIONS (Complete "chain_of_thought_analysis" FIRST):
           : '';
 
         const response = await withTimeout(ai.models.generateContent({
-          model: MODELS.fast,
+          model: ai.model,
           contents: `Conversation History:
 ${historyText}
 Latest User Message: "${cleanMessage}"
@@ -1160,7 +1122,7 @@ Instructions:
         });
         return;
       } catch (err) {
-        noteGeminiFailure('ai-intake-chat', err);
+        noteAiFailure('ai-intake-chat', err, ai, res);
         // Fall through to deterministic response below
       }
     }
@@ -1199,468 +1161,118 @@ Instructions:
     });
   });
 
-  // 8. Live Online Nearby Hotel Deals Search (OpenStreetMap Overpass + Gemini Google Search Grounding + Google Maps Integration & Test Suite)
+  // 8. Nearby hotels: REAL hotels from OpenStreetMap (ODbL) + honest link-outs for live rates.
+  // No prices, ratings, "savings" or brand listings are ever invented: nightly rates are not
+  // available from open data, so each result links to a live Google Maps / Google Hotels search.
   app.post('/api/agents/search-nearby-hotels', async (req: Request, res: Response) => {
-    const startTime = Date.now();
-    const {
-      location = 'Napa Valley, CA',
-      maxNightlyBudget = 180,
-      eventType = 'wedding',
-    } = req.body ?? {};
+    const { location = 'Napa Valley, CA' } = req.body ?? {};
+    const cleanLoc = sanitizeUntrustedInput(String(location).slice(0, 200)).sanitizedText;
+    const cityQuery = cleanLoc.split('—')[0].trim() || cleanLoc;
 
-    const cleanLoc = sanitizeUntrustedInput(String(location)).sanitizedText;
-    const cityQuery = cleanLoc.split('—')[0].split('-')[0].trim() || cleanLoc;
-    const budgetCap = Math.max(45, Number(maxNightlyBudget) || 180);
-
-    const lowerCity = cleanLoc.toLowerCase();
-    let cityLat = lowerCity.includes('udaipur')
-      ? 24.5854
-      : lowerCity.includes('boston')
-      ? 42.3601
-      : lowerCity.includes('sonoma') || lowerCity.includes('napa')
-      ? 38.2975
-      : lowerCity.includes('austin')
-      ? 30.2672
-      : 37.7749;
-    let cityLng = lowerCity.includes('udaipur')
-      ? 73.7125
-      : lowerCity.includes('boston')
-      ? -71.0589
-      : lowerCity.includes('sonoma') || lowerCity.includes('napa')
-      ? -122.2869
-      : lowerCity.includes('austin')
-      ? -97.7431
-      : -122.4194;
-
-    const enrichDealWithGoogleMaps = (
-      deal: Omit<
-        LiveNearbyHotelDeal,
-        'google_maps_url' | 'google_directions_url' | 'google_embed_query'
-      >,
-      idx: number
-    ): LiveNearbyHotelDeal => {
-      const lat = deal.lat ?? Number((cityLat + (idx - 1) * 0.008).toFixed(5));
-      const lng = deal.lng ?? Number((cityLng + (idx - 1) * 0.009).toFixed(5));
-      const embedQuery = `${deal.hotel_name}, ${deal.neighborhood_or_address}`;
-      const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-        embedQuery
-      )}`;
-      const googleDirectionsUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(
-        cleanLoc
-      )}&destination=${encodeURIComponent(embedQuery)}&travelmode=driving`;
-
-      return {
-        ...deal,
-        lat,
-        lng,
-        google_embed_query: embedQuery,
-        google_maps_url: googleMapsUrl,
-        google_directions_url: googleDirectionsUrl,
-      };
-    };
-
-    const buildTestBenchmark = (
-      deals: LiveNearbyHotelDeal[],
-      sourcePipeline: string
-    ): CheapHotelTestRunResult => {
-      const sorted = [...deals].sort((a, b) => a.price_per_night - b.price_per_night);
-      const cheapest = sorted[0];
-      const avgSavings =
-        sorted.length > 0
-          ? Math.round(
-              sorted.reduce((sum, d) => sum + d.savings_pct, 0) / sorted.length
-            )
-          : 0;
-      const isSortedAsc = deals.every(
-        (d, i) => i === 0 || d.price_per_night >= deals[i - 1].price_per_night
-      );
-      const hasMapsData = deals.every(
-        (d) =>
-          Boolean(d.google_maps_url) &&
-          Boolean(d.google_directions_url) &&
-          typeof d.lat === 'number' &&
-          typeof d.lng === 'number'
-      );
-
-      return {
-        timestamp: new Date().toISOString(),
-        city_tested: cityQuery,
-        budget_cap: budgetCap,
-        latency_ms: Math.max(12, Date.now() - startTime),
-        source_pipeline: sourcePipeline,
-        hotels_found: deals.length,
-        cheapest_hotel_name: cheapest?.hotel_name ?? 'N/A',
-        cheapest_nightly_rate: cheapest?.price_per_night ?? 0,
-        average_savings_pct: avgSavings,
-        assertions: [
-          {
-            name: 'Geo-Coordinate & Venue Resolution',
-            passed: deals.length > 0 && Number.isFinite(cityLat) && Number.isFinite(cityLng),
-            detail: `Resolved ${cityQuery} cluster (${cityLat.toFixed(4)}, ${cityLng.toFixed(4)}) with ${deals.length} nearby hotels`,
-          },
-          {
-            name: 'Cheap Hotel Rate Under Target Cap',
-            passed: Boolean(cheapest && cheapest.price_per_night <= budgetCap),
-            detail: cheapest
-              ? `Cheapest hotel "${cheapest.hotel_name}" is $${cheapest.price_per_night}/nt (Target cap: <= $${budgetCap}/nt)`
-              : 'No deals returned',
-          },
-          {
-            name: 'Group Block Discount Verification',
-            passed: avgSavings >= 15,
-            detail: `Average group block discount is ${avgSavings}% below retail nightly rates`,
-          },
-          {
-            name: 'Google Maps Pin & Route Binding',
-            passed: hasMapsData,
-            detail: `All ${deals.length} hotels bound with lat/lng pins, Google Maps embed queries, and driving route links`,
-          },
-          {
-            name: 'Lowest-Price Sorting Invariant (ASC)',
-            passed: isSortedAsc,
-            detail: `Verified ascending price order ($${sorted.map((d) => d.price_per_night).join(' → $')}/nt)`,
-          },
-        ],
-      };
-    };
-
-    // Step A: Try live OpenStreetMap Nominatim + Overpass API for real hotel POIs in that city
-    let osmHotelNames: {
-      name: string;
-      street?: string;
-      website?: string;
-      stars?: number;
-      lat?: number;
-      lng?: number;
-    }[] = [];
-    try {
-      const geoRes = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(
-          cityQuery
-        )}`,
-        {
-          headers: {
-            'User-Agent': 'PlanGenieEventAssistant/1.0',
-          },
-          signal: AbortSignal.timeout(3500),
-        }
-      );
-      if (geoRes.ok) {
-        const geoData = (await geoRes.json()) as any[];
-        if (Array.isArray(geoData) && geoData[0]?.lat && geoData[0]?.lon) {
-          cityLat = Number(geoData[0].lat);
-          cityLng = Number(geoData[0].lon);
-          const overpassQuery = `[out:json][timeout:4];(node["tourism"="hotel"](around:12000,${cityLat},${cityLng});way["tourism"="hotel"](around:12000,${cityLat},${cityLng}););out center tags 8;`;
-          const ovRes = await fetch('https://overpass-api.de/api/interpreter', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: `data=${encodeURIComponent(overpassQuery)}`,
-            signal: AbortSignal.timeout(4000),
-          });
-          if (ovRes.ok) {
-            const ovJson = (await ovRes.json()) as any;
-            if (Array.isArray(ovJson?.elements)) {
-              osmHotelNames = ovJson.elements
-                .filter((el: any) => el?.tags?.name)
-                .slice(0, 6)
-                .map((el: any) => ({
-                  name: String(el.tags.name),
-                  street: el.tags['addr:street']
-                    ? `${el.tags['addr:street']}, ${el.tags['addr:city'] || cityQuery}`
-                    : cityQuery,
-                  website: el.tags.website || el.tags['contact:website'] || undefined,
-                  stars: Number(el.tags.stars) || undefined,
-                  lat: Number(el.lat ?? el.center?.lat) || undefined,
-                  lng: Number(el.lon ?? el.center?.lon) || undefined,
-                }));
-            }
-          }
-        }
-      }
-    } catch {
-      // Continue to Gemini Google Search Grounding / curated regional deals
-    }
-
-    // Step B: Use Gemini with Google Search Grounding (`tools: [{ googleSearch: {} }]`) for live hotel pricing & deals
-    const ai = createGeminiClient();
-    if (ai) {
-      try {
-        const searchResponse = await withTimeout(ai.models.generateContent({
-          model: MODELS.fast,
-          contents: `Search online for real, affordable, well-rated hotels near "${cleanLoc}" (for a ${eventType} group room block with target budget under $${budgetCap}/night).
-${osmHotelNames.length > 0 ? `Include or compare these real local hotels found on OpenStreetMap: ${osmHotelNames.map((h) => h.name).join(', ')}.` : ''}
-Return ONLY a valid JSON array of 4 hotels sorted from cheapest nightly price to mid-range group value, with fields:
-[
-  {
-    "hotel_name": "string",
-    "neighborhood_or_address": "string",
-    "distance_from_venue": "e.g. 0.8 miles from venue",
-    "price_per_night": number,
-    "original_retail_price": number,
-    "star_rating": number,
-    "tier_label": "Best Budget Deal" | "Mid-Range Value" | "Group Block Favorite",
-    "amenities": ["Free Breakfast", "Group Shuttle", "Free Cancellation"],
-    "booking_url": "https://..."
-  }
-]`,
-          config: {
-            tools: [{ googleSearch: {} }],
-          },
-        }));
-
-        const rawText = (searchResponse.text ?? '').trim();
-        const jsonMatch = rawText.match(/\[[\s\S]*\]/);
-        const groundingChunks =
-          searchResponse.candidates?.[0]?.groundingMetadata?.groundingChunks ?? [];
-        const firstGroundingUrl =
-          groundingChunks.find((c: any) => c?.web?.uri)?.web?.uri ||
-          `https://www.google.com/travel/hotels?q=${encodeURIComponent(`hotels near ${cityQuery}`)}`;
-
-        if (jsonMatch) {
-          const parsedArr = JSON.parse(jsonMatch[0]);
-          if (Array.isArray(parsedArr) && parsedArr.length > 0) {
-            const rawDeals: LiveNearbyHotelDeal[] = parsedArr
-              .map((d: any, idx: number): LiveNearbyHotelDeal => {
-                const rawPrice = Math.max(42, Number(d.price_per_night) || Math.round(budgetCap * (0.55 + idx * 0.12)));
-                const price = idx === 0 ? Math.min(rawPrice, Math.round(budgetCap * 0.78)) : rawPrice;
-                const retail = Math.max(price + 28, Number(d.original_retail_price) || Math.round(price * 1.28));
-                const savingsPct = Math.round(((retail - price) / retail) * 100);
-                const matchedOsm = osmHotelNames[idx];
-                return enrichDealWithGoogleMaps(
-                  {
-                    id: `deal_live_${Date.now()}_${idx}`,
-                    hotel_name: String(d.hotel_name || matchedOsm?.name || `${cityQuery} Inn & Suites`),
-                    neighborhood_or_address: String(d.neighborhood_or_address || matchedOsm?.street || cityQuery),
-                    distance_from_venue: String(d.distance_from_venue || `${(0.6 + idx * 0.5).toFixed(1)} mi from venue`),
-                    price_per_night: price,
-                    original_retail_price: retail,
-                    savings_pct: savingsPct,
-                    star_rating: Math.min(5, Math.max(3, Number(d.star_rating) || 4.1)),
-                    tier_label:
-                      idx === 0
-                        ? 'Best Budget Deal'
-                        : idx === 1
-                        ? 'Group Block Favorite'
-                        : 'Mid-Range Value',
-                    amenities: Array.isArray(d.amenities)
-                      ? d.amenities.slice(0, 4).map(String)
-                      : ['Group Block Discount', 'Free Wi-Fi', 'Breakfast Included'],
-                    booking_url: safeHttpUrl(d.booking_url) ?? safeHttpUrl(firstGroundingUrl) ?? `https://www.google.com/travel/hotels?q=${encodeURIComponent(`hotels near ${cityQuery}`)}`,
-                    source_label: 'Live Google Search Grounding + Google Maps',
-                    lat: matchedOsm?.lat,
-                    lng: matchedOsm?.lng,
-                  },
-                  idx
-                );
-              })
-              .sort((a: LiveNearbyHotelDeal, b: LiveNearbyHotelDeal) => a.price_per_night - b.price_per_night);
-
-            res.json({
-              location: cleanLoc,
-              cityCenter: { lat: cityLat, lng: cityLng },
-              deals: rawDeals,
-              testBenchmark: buildTestBenchmark(
-                rawDeals,
-                'Gemini Google Search Grounding + OpenStreetMap Geo-Engine'
-              ),
-              groundingSources: groundingChunks
-                .filter((c: any) => c?.web?.uri)
-                .slice(0, 4)
-                .map((c: any) => ({
-                  title: c.web.title || 'Google Travel / Hotel Rates',
-                  uri: c.web.uri,
-                })),
-            });
-            return;
-          }
-        }
-      } catch (err) {
-        noteGeminiFailure('hotel-grounding', err);
-        // Fall through to OSM + regional live deal synthesis
-      }
-    }
-
-    // Step C: If OSM returned real hotel names, build live deals from those real OSM hotels
-    if (osmHotelNames.length > 0) {
-      const osmDeals: LiveNearbyHotelDeal[] = osmHotelNames
-        .slice(0, 4)
-        .map((h, idx) => {
-          const basePrice = Math.max(48, Math.round(budgetCap * (0.52 + idx * 0.12)));
-          const retailPrice = Math.round(basePrice * 1.28);
-          return enrichDealWithGoogleMaps(
-            {
-              id: `deal_osm_${Date.now()}_${idx}`,
-              hotel_name: h.name,
-              neighborhood_or_address: h.street || cityQuery,
-              distance_from_venue: `${(0.5 + idx * 0.5).toFixed(1)} mi from ${cleanLoc.split('—')[0].trim()}`,
-              price_per_night: basePrice,
-              original_retail_price: retailPrice,
-              savings_pct: Math.round(((retailPrice - basePrice) / retailPrice) * 100),
-              star_rating: h.stars || (idx === 0 ? 3.9 : 4.2),
-              tier_label:
-                idx === 0
-                  ? 'Best Budget Deal'
-                  : idx === 1
-                  ? 'Group Block Favorite'
-                  : 'Mid-Range Value',
-              amenities: ['Group Rate Eligible', 'Free Cancellation', 'Breakfast & Parking'],
-              booking_url:
-                safeHttpUrl(h.website) ||
-                `https://www.google.com/travel/hotels?q=${encodeURIComponent(`${h.name} ${cityQuery}`)}`,
-              source_label: 'OpenStreetMap Live POI + Google Maps Pin',
-              lat: h.lat,
-              lng: h.lng,
-            },
-            idx
-          );
-        })
-        .sort((a, b) => a.price_per_night - b.price_per_night);
-
+    const geo = await geocode(cityQuery);
+    const links = [
+      {
+        title: `Google Maps — hotels near ${cityQuery}`,
+        uri: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`hotels near ${cityQuery}`)}`,
+      },
+      {
+        title: `Google Hotels — compare live rates in ${cityQuery}`,
+        uri: `https://www.google.com/travel/hotels?q=${encodeURIComponent(`hotels in ${cityQuery}`)}`,
+      },
+    ];
+    if (!geo) {
       res.json({
         location: cleanLoc,
-        cityCenter: { lat: cityLat, lng: cityLng },
-        deals: osmDeals,
-        testBenchmark: buildTestBenchmark(
-          osmDeals,
-          'OpenStreetMap Overpass Live POI + Google Maps Pin Engine'
-        ),
-        groundingSources: [
-          {
-            title: `Google Maps — Hotels near ${cityQuery}`,
-            uri: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`hotels near ${cityQuery}`)}`,
-          },
-          {
-            title: `OpenStreetMap Hotels near ${cityQuery}`,
-            uri: `https://www.openstreetmap.org/search?query=${encodeURIComponent(cityQuery)}`,
-          },
-        ],
+        cityCenter: null,
+        deals: [],
+        notice: 'Could not locate that place on OpenStreetMap. Use the links below to search for hotels.',
+        groundingSources: links,
+        attribution: '© OpenStreetMap contributors',
       });
       return;
     }
 
-    // Step D: Regional curated affordable hotel deals sorted by lowest price
-    const isIndia =
-      lowerCity.includes('india') ||
-      lowerCity.includes('udaipur') ||
-      lowerCity.includes('jaipur') ||
-      lowerCity.includes('mumbai');
-
-    const scaleToCap = (defaultRate: number, factor: number) =>
-      Math.min(defaultRate, Math.max(42, Math.round(budgetCap * factor)));
-
-    const defaultDeals: LiveNearbyHotelDeal[] = (
-      isIndia
-        ? [
-            {
-              id: `deal_ind_1_${Date.now()}`,
-              hotel_name: `Ginger Hotel & Suites ${cityQuery}`,
-              neighborhood_or_address: `Subhash Nagar / Central ${cityQuery}`,
-              distance_from_venue: '0.7 mi from venue',
-              price_per_night: scaleToCap(52, 0.54),
-              original_retail_price: 78,
-              savings_pct: 33,
-              star_rating: 4.0,
-              tier_label: 'Best Budget Deal' as const,
-              amenities: ['Complimentary Buffet Breakfast', 'Group Block 30+ Rooms', 'Venue Shuttle'],
-              booking_url: `https://www.google.com/travel/hotels?q=${encodeURIComponent(`Ginger Hotel ${cityQuery}`)}`,
-              source_label: 'Google Maps & Regional Group Rate Index',
-            },
-            {
-              id: `deal_ind_2_${Date.now()}`,
-              hotel_name: `Lemon Tree Premier Courtyard ${cityQuery}`,
-              neighborhood_or_address: `Heritage District, ${cityQuery}`,
-              distance_from_venue: '1.1 mi from venue',
-              price_per_night: scaleToCap(74, 0.72),
-              original_retail_price: 105,
-              savings_pct: 30,
-              star_rating: 4.3,
-              tier_label: 'Group Block Favorite' as const,
-              amenities: ['Baraat & Wedding Welcome Desk', 'Airport Transfer', 'Early Check-In for Guests'],
-              booking_url: `https://www.google.com/travel/hotels?q=${encodeURIComponent(`Lemon Tree Hotel ${cityQuery}`)}`,
-              source_label: 'Google Maps & Regional Group Rate Index',
-            },
-            {
-              id: `deal_ind_3_${Date.now()}`,
-              hotel_name: `Radisson Blu Haveli & Convention ${cityQuery}`,
-              neighborhood_or_address: `Fateh Sagar Lakefront, ${cityQuery}`,
-              distance_from_venue: '1.5 mi from venue',
-              price_per_night: scaleToCap(96, 0.9),
-              original_retail_price: 138,
-              savings_pct: 30,
-              star_rating: 4.5,
-              tier_label: 'Mid-Range Value' as const,
-              amenities: ['Dedicated Sangeet Hospitality Lounge', 'Valet & Coach Parking', 'Breakfast Included'],
-              booking_url: `https://www.google.com/travel/hotels?q=${encodeURIComponent(`Radisson ${cityQuery}`)}`,
-              source_label: 'Google Maps & Regional Group Rate Index',
-            },
-          ]
-        : [
-            {
-              id: `deal_us_1_${Date.now()}`,
-              hotel_name: `Hampton Inn & Suites by Hilton — ${cityQuery}`,
-              neighborhood_or_address: `${cityQuery} Central Corridor`,
-              distance_from_venue: '0.8 mi from venue',
-              price_per_night: scaleToCap(98, 0.62),
-              original_retail_price: 139,
-              savings_pct: 29,
-              star_rating: 4.1,
-              tier_label: 'Best Budget Deal' as const,
-              amenities: ['Free Hot Breakfast', 'No Attrition Group Block (10+ Rooms)', 'Free Parking'],
-              booking_url: `https://www.google.com/travel/hotels?q=${encodeURIComponent(`Hampton Inn ${cityQuery}`)}`,
-              source_label: 'Google Maps & Group Rate Index',
-            },
-            {
-              id: `deal_us_2_${Date.now()}`,
-              hotel_name: `Courtyard by Marriott ${cityQuery}`,
-              neighborhood_or_address: `${cityQuery} Main Avenue`,
-              distance_from_venue: '1.2 mi from venue',
-              price_per_night: scaleToCap(122, 0.78),
-              original_retail_price: 169,
-              savings_pct: 28,
-              star_rating: 4.3,
-              tier_label: 'Group Block Favorite' as const,
-              amenities: ['Dedicated Group Booking Link', 'Venue Shuttle Boarding Zone', 'Late Checkout'],
-              booking_url: `https://www.google.com/travel/hotels?q=${encodeURIComponent(`Courtyard Marriott ${cityQuery}`)}`,
-              source_label: 'Google Maps & Group Rate Index',
-            },
-            {
-              id: `deal_us_3_${Date.now()}`,
-              hotel_name: `Hyatt Place ${cityQuery} Center`,
-              neighborhood_or_address: `${cityQuery} Historic District`,
-              distance_from_venue: '1.6 mi from venue',
-              price_per_night: scaleToCap(139, 0.92),
-              original_retail_price: 189,
-              savings_pct: 26,
-              star_rating: 4.4,
-              tier_label: 'Mid-Range Value' as const,
-              amenities: ['Spacious King Suites', 'Welcome Bag Distribution at Front Desk', 'Breakfast Included'],
-              booking_url: `https://www.google.com/travel/hotels?q=${encodeURIComponent(`Hyatt Place ${cityQuery}`)}`,
-              source_label: 'Google Maps & Group Rate Index',
-            },
-          ]
-    )
-      .map((d, idx) => enrichDealWithGoogleMaps(d, idx))
-      .sort((a, b) => a.price_per_night - b.price_per_night);
+    const hotels = await findHotelsNear(geo.lat, geo.lng, 8);
+    const deals: LiveNearbyHotelDeal[] = hotels.map((h) => {
+      const q = `${h.name}, ${h.address || cityQuery}`;
+      return {
+        id: h.id,
+        hotel_name: h.name,
+        neighborhood_or_address: h.address || cityQuery,
+        distance_from_venue: `${h.distanceMiles} mi from ${cityQuery} centre`,
+        price_per_night: 0, // unknown: see booking link
+        original_retail_price: 0,
+        savings_pct: 0,
+        star_rating: h.stars ?? 0,
+        tier_label: 'Nearby Hotel',
+        amenities: [],
+        booking_url:
+          safeHttpUrl(h.website) ??
+          `https://www.google.com/travel/hotels?q=${encodeURIComponent(q)}`,
+        source_label: 'OpenStreetMap contributors (ODbL)',
+        lat: h.lat,
+        lng: h.lng,
+        google_maps_url: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`,
+        google_directions_url: `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(q)}&travelmode=driving`,
+        google_embed_query: q,
+      };
+    });
 
     res.json({
       location: cleanLoc,
-      cityCenter: { lat: cityLat, lng: cityLng },
-      deals: defaultDeals,
-      testBenchmark: buildTestBenchmark(
-        defaultDeals,
-        'Regional Group Rate Index + Google Maps Pin Engine'
-      ),
-      groundingSources: [
-        {
-          title: `Google Maps — Cheap Hotels near ${cityQuery}`,
-          uri: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`cheap hotels near ${cityQuery}`)}`,
-        },
-        {
-          title: `Google Travel — Group Hotel Rates in ${cityQuery}`,
-          uri: `https://www.google.com/travel/hotels?q=${encodeURIComponent(`cheap hotels near ${cityQuery}`)}`,
-        },
-      ],
+      cityCenter: { lat: geo.lat, lng: geo.lng },
+      deals,
+      notice:
+        deals.length === 0
+          ? 'No hotels are mapped on OpenStreetMap near that place. Use the links below to search live listings.'
+          : 'Hotels come from OpenStreetMap. Nightly rates are not available from open data — use the booking links to see current prices.',
+      groundingSources: links,
+      attribution: '© OpenStreetMap contributors',
     });
+  });
+
+  // BYOK helpers. The key travels in the POST body over HTTPS, is used for one upstream call,
+  // and is never stored or logged (errors are scrubbed with redactSecret).
+  const readByok = (body: any) => {
+    try {
+      return validateAiConfig({
+        provider: isProviderId(body?.provider) ? body.provider : undefined,
+        apiKey: typeof body?.apiKey === 'string' ? body.apiKey : undefined,
+        model: typeof body?.model === 'string' ? body.model : undefined,
+        baseUrl: typeof body?.baseUrl === 'string' ? body.baseUrl : undefined,
+      });
+    } catch (err) {
+      throw new HttpError(400, err instanceof Error ? err.message : 'Invalid AI configuration');
+    }
+  };
+
+  app.post('/api/ai/models', async (req: Request, res: Response) => {
+    const raw = req.body ?? {};
+    // Listing does not need a chosen model: use a placeholder so validation passes.
+    const cfg = readByok({ ...raw, model: raw.model || 'placeholder' });
+    try {
+      res.json({ models: await listModels(cfg) });
+    } catch (err) {
+      res.status(502).json({ error: redactSecret(err instanceof Error ? err.message : 'Could not list models', cfg.apiKey) });
+    }
+  });
+
+  app.post('/api/ai/test', async (req: Request, res: Response) => {
+    const cfg = readByok(req.body);
+    try {
+      const out = await testConnection(cfg);
+      res.json({ ok: true, provider: cfg.provider, model: cfg.model, sample: out.sample });
+    } catch (err) {
+      res.status(502).json({ error: redactSecret(err instanceof Error ? err.message : 'Connection failed', cfg.apiKey) });
+    }
+  });
+
+  // Geocoding for the OpenStreetMap embed (cached, throttled; see src/server/geo.ts)
+  app.post('/api/geocode', async (req: Request, res: Response) => {
+    const q = sanitizeUntrustedInput(String(req.body?.query ?? '').slice(0, 200)).sanitizedText;
+    const geo = await geocode(q.split('—')[0].trim() || q);
+    // 200 + found:false (not 404) so an upstream hiccup is not logged as a client error
+    res.json(geo ?? { found: false });
   });
 
   // 9. Personalised idea generator (Gemini when available, deterministic engine otherwise)
@@ -1677,12 +1289,12 @@ Return ONLY a valid JSON array of 4 hotels sorted from cheapest nightly price to
     };
     const baseline: IdeaSet = generateIdeas(request, Math.floor(Math.random() * 1000));
 
-    const ai = createGeminiClient();
+    const ai = getAi(req);
     if (ai) {
       try {
         const response = await withTimeout(
           ai.models.generateContent({
-            model: MODELS.fast,
+            model: ai.model,
             contents: `Event: ${JSON.stringify(request)}
 Give 9 distinct, specific, personalised ideas (themes, activities, food & drink, decor, favors, guest experiences) plus 2 money-saving tips that fit the budget of about $${Math.round(request.targetBudget / request.guestCount)} per guest.`,
             config: {
@@ -1726,11 +1338,11 @@ Give 9 distinct, specific, personalised ideas (themes, activities, food & drink,
                 : undefined,
           }));
         if (ideas.length >= 3) {
-          res.json({ source: 'gemini', set: { ...baseline, ideas } });
+          res.json({ source: 'ai', provider: ai.provider, set: { ...baseline, ideas } });
           return;
         }
       } catch (err) {
-        noteGeminiFailure('ideas', err);
+        noteAiFailure('ideas', err, ai, res);
       }
     }
     res.json({ source: 'local', set: baseline });
@@ -1759,6 +1371,10 @@ Give 9 distinct, specific, personalised ideas (themes, activities, food & drink,
 
   // Centralised error handler: malformed JSON, oversized bodies, unexpected throws
   app.use((err: any, _req: Request, res: Response, _next: express.NextFunction) => {
+    if (err instanceof HttpError) {
+      if (!res.headersSent) res.status(err.status).json({ error: err.message });
+      return;
+    }
     const status = err?.status === 413 || err?.type === 'entity.too.large' ? 413 : err?.type === 'entity.parse.failed' ? 400 : 500;
     if (status === 500) console.error('[server] unhandled error:', err);
     if (res.headersSent) return;
@@ -1775,9 +1391,9 @@ Give 9 distinct, specific, personalised ideas (themes, activities, food & drink,
   const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`PlanGenie server running on http://0.0.0.0:${PORT}`);
     console.log(
-      isConfiguredGeminiKey(process.env.GEMINI_API_KEY)
-        ? `AI mode: Gemini (${MODELS.fast}) with automatic local-engine fallback`
-        : 'AI mode: built-in deterministic engine (set GEMINI_API_KEY to enable Gemini)'
+      resolveAiConfig({ headers: {} } as Request)
+        ? 'AI mode: BYOK (users bring their own key) + server default key; automatic local-engine fallback'
+        : 'AI mode: BYOK — users add their own key in AI Settings; built-in engine until then'
     );
   });
   if (isProd && !process.env.ENCRYPTION_MASTER_KEY) {

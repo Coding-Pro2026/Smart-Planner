@@ -31,8 +31,12 @@ import {
 } from '../types/domain';
 import {
   GoogleCalendarSyncResult,
+  buildGoogleCalendarTemplateUrl,
   getAccessToken,
+  getGoogleClientId,
   googleSignIn,
+  isValidGoogleClientId,
+  setGoogleClientId,
   initAuth,
   isValidEmailAddress,
   logout,
@@ -78,7 +82,11 @@ export const ThemeAndRsvpView: React.FC<ThemeAndRsvpViewProps> = ({
   const [dietary, setDietary] = useState('None');
   const [seatingTable, setSeatingTable] = useState('Table 04 — Conservatory');
 
-  // Google Calendar OAuth & Sync State
+  // Google Calendar OAuth & Sync State (uses the USER'S OWN OAuth client; none of ours)
+  const [clientId, setClientId] = useState<string>(() => getGoogleClientId());
+  const [showSetup, setShowSetup] = useState(false);
+  const [clientDraft, setClientDraft] = useState('');
+  const [setupError, setSetupError] = useState<string | null>(null);
   const [needsAuth, setNeedsAuth] = useState(true);
   const [googleUser, setGoogleUser] = useState<User | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
@@ -232,6 +240,18 @@ export const ThemeAndRsvpView: React.FC<ThemeAndRsvpViewProps> = ({
     });
   };
 
+  const handleAddToGoogleCalendar = () => {
+    const { url, includedGuests, truncated } = buildGoogleCalendarTemplateUrl(
+      event,
+      rsvps.map((r) => r.contact)
+    );
+    window.open(url, '_blank', 'noopener,noreferrer');
+    setCalendarFeedback({
+      type: 'success',
+      message: `Opened Google Calendar with the event${includedGuests ? ` and ${includedGuests} guest(s)` : ''} pre-filled — click Save there to send the invitations.${truncated ? ' (Too many guests for one link: add the rest in Google Calendar, or use the .ics file.)' : ''}`,
+    });
+  };
+
   const handleCopyInviteText = async () => {
     try {
       await navigator.clipboard.writeText(inviteText);
@@ -343,16 +363,24 @@ export const ThemeAndRsvpView: React.FC<ThemeAndRsvpViewProps> = ({
               Send Email Invitations &amp; Sync Guest RSVPs
             </h2>
             <p className="text-xs text-stone-500 leading-relaxed">
-              Publish <strong className="text-stone-800">{event.title}</strong> ({event.date}) to your Google Calendar and automatically email invitations to your guest list. When guests click{' '}
-              <strong className="text-emerald-700">Yes</strong> or{' '}
-              <strong className="text-rose-700">No</strong> in their email invitation, click{' '}
-              <strong className="text-stone-800">Sync Responses</strong> to update their RSVP status here.
+              Put <strong className="text-stone-800">{event.title}</strong> ({event.date}) on your Google Calendar and invite your guests —
+              no account linking needed (use <strong className="text-stone-800">Add to Google Calendar</strong> below). Optionally enable
+              two-way sync with your own free Google Cloud OAuth client to pull guests’ Yes/No answers back in automatically.
             </p>
           </div>
 
           {/* Auth & Sync Controls */}
           <div className="flex flex-wrap items-center gap-3">
             {needsAuth || !accessToken ? (
+              !clientId ? (
+              <button
+                type="button"
+                onClick={() => setShowSetup((v) => !v)}
+                className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-stone-800 bg-stone-100 hover:bg-stone-200 rounded-2xl transition-colors"
+              >
+                Enable two-way sync (optional)
+              </button>
+              ) : (
               <button
                 type="button"
                 onClick={handleGoogleLogin}
@@ -389,6 +417,7 @@ export const ThemeAndRsvpView: React.FC<ThemeAndRsvpViewProps> = ({
                   {isLoggingIn ? 'Signing in...' : 'Sign in with Google'}
                 </span>
               </button>
+              )
             ) : (
               <div className="flex flex-wrap items-center gap-2.5">
                 <button
@@ -476,6 +505,55 @@ export const ThemeAndRsvpView: React.FC<ThemeAndRsvpViewProps> = ({
           </div>
         </div>
 
+        {showSetup && !clientId && (
+          <div className="p-5 rounded-2xl bg-stone-50 border border-stone-200 space-y-3 text-xs text-stone-600">
+            <h4 className="text-xs font-bold text-stone-900">Enable two-way sync with your own Google OAuth client (free, ~3 min)</h4>
+            <ol className="list-decimal pl-5 space-y-1 leading-relaxed">
+              <li>In <a className="text-[#4A6B53] hover:underline" href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener noreferrer">Google Cloud Console</a>, create a project and enable the <strong>Google Calendar API</strong>.</li>
+              <li>Under <strong>Google Auth platform → Clients</strong>, create an <strong>OAuth client ID</strong> of type <strong>Web application</strong>.</li>
+              <li>Add <code className="font-mono">{typeof window !== 'undefined' ? window.location.origin : ''}</code> as an <strong>Authorized JavaScript origin</strong>.</li>
+              <li>Keep the app in “Testing” and add your own Google account as a test user. Paste the Client ID below.</li>
+            </ol>
+            <div className="flex flex-wrap gap-2">
+              <input
+                value={clientDraft}
+                onChange={(e) => setClientDraft(e.target.value)}
+                placeholder="1234567890-abc123.apps.googleusercontent.com"
+                className="flex-1 min-w-[240px] px-3 py-2 border border-stone-300 rounded-xl font-mono"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  if (!isValidGoogleClientId(clientDraft)) {
+                    setSetupError('That does not look like a Google OAuth Client ID (…apps.googleusercontent.com).');
+                    return;
+                  }
+                  setGoogleClientId(clientDraft);
+                  setClientId(clientDraft.trim());
+                  setClientDraft('');
+                  setSetupError(null);
+                  setShowSetup(false);
+                }}
+                className="px-4 py-2 font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl"
+              >
+                Save Client ID
+              </button>
+            </div>
+            {setupError && <p role="alert" className="text-rose-700">{setupError}</p>}
+            <p className="text-[11px] text-stone-400 leading-relaxed">
+              A Client ID is not a secret. The sign-in happens directly between your browser and Google; PlanGenie only asks for permission to manage events on your calendar and keeps the token in memory.
+            </p>
+          </div>
+        )}
+        {clientId && (
+          <p className="text-[11px] text-stone-400">
+            Using your Google OAuth client.{' '}
+            <button type="button" className="underline hover:text-stone-600" onClick={() => { setGoogleClientId(''); setClientId(''); setNeedsAuth(true); }}>
+              Remove
+            </button>
+          </p>
+        )}
+
         {/* Keyless alternatives: work without any Google/Firebase configuration */}
         <div className="pt-4 border-t border-stone-100 space-y-3">
           <div>
@@ -485,6 +563,13 @@ export const ThemeAndRsvpView: React.FC<ThemeAndRsvpViewProps> = ({
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={handleAddToGoogleCalendar}
+              className="px-3.5 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl"
+            >
+              Add to Google Calendar
+            </button>
             <button
               type="button"
               disabled={pendingEmails.length === 0}

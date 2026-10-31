@@ -32,7 +32,7 @@ export function IdeaStudioView({
   const [variation, setVariation] = useState(0);
   const [aiSet, setAiSet] = useState<IdeaSet | null>(null);
   const [loading, setLoading] = useState(false);
-  const [source, setSource] = useState<'local' | 'gemini'>('local');
+  const [source, setSource] = useState<'local' | 'ai'>('local');
 
   const localSet = useMemo(
     () =>
@@ -51,11 +51,11 @@ export function IdeaStudioView({
     [event, interests, vibe, variation]
   );
 
-  const shown = source === 'gemini' && aiSet ? aiSet : localSet;
+  const shown = source === 'ai' && aiSet ? aiSet : localSet;
 
   const askAi = async () => {
     setLoading(true);
-    const res = await postJson<{ source: 'gemini' | 'local'; set: IdeaSet }>(
+    const res = await postJson<{ source: 'ai' | 'local'; provider?: string; set: IdeaSet }>(
       '/api/agents/ideas',
       {
         eventType: event.event_type,
@@ -71,17 +71,17 @@ export function IdeaStudioView({
     setLoading(false);
     if (res.ok && res.data?.set?.ideas?.length) {
       setAiSet(res.data.set);
-      setSource(res.data.source === 'gemini' ? 'gemini' : 'local');
+      setSource(res.data.source === 'ai' ? 'ai' : 'local');
       onToast(
         'success',
-        res.data.source === 'gemini'
-          ? 'Fresh Gemini-powered ideas ready'
+        res.data.source === 'ai'
+          ? 'Fresh AI-generated ideas ready'
           : 'Ideas refreshed with the built-in planning engine'
       );
     } else {
       setSource('local');
       setVariation((v) => v + 1);
-      onToast('info', 'AI is offline — generated new ideas with the built-in engine.');
+      onToast('info', 'No AI key connected (or it failed) — generated new ideas with the built-in engine. Add your key via the key button.');
     }
   };
 
@@ -97,7 +97,7 @@ export function IdeaStudioView({
             <p className="text-xs text-stone-500 mt-1 max-w-xl">{shown.headline}</p>
           </div>
           <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-stone-100 text-stone-600">
-            {source === 'gemini' ? 'Powered by Gemini' : 'Built-in engine · works offline'}
+            {source === 'ai' ? 'Powered by your AI model' : 'Built-in engine · works offline'}
           </span>
         </div>
 

@@ -243,7 +243,7 @@ export const EntryModeAndAiIntakeView: React.FC<EntryModeAndAiIntakeViewProps> =
               </span>
               <span className="hidden sm:inline-block text-xs text-stone-400 mx-2">·</span>
               <span className="hidden sm:inline-block text-xs font-medium text-stone-600">
-                Agentic Event Architecture, Live Hotel Deals &amp; Cultural Workflows
+                Agentic Event Architecture, Nearby Hotels &amp; Cultural Workflows
               </span>
             </div>
           </div>

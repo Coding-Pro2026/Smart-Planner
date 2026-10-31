@@ -24,6 +24,8 @@ import {
 } from 'lucide-react';
 import { EventRecord, LiveNearbyHotelDeal } from '../types/domain';
 import { safeHttpUrl } from '../lib/url';
+import { getMapsKey, isValidMapsKey, osmEmbedUrl, osmViewUrl, setMapsKey } from '../lib/mapsConfig';
+import { postJson } from '../lib/api';
 
 interface EventVenueAndHotelsMapProps {
   event: EventRecord;
@@ -507,30 +509,60 @@ export const EventVenueAndHotelsMap: React.FC<EventVenueAndHotelsMapProps> = ({
   onSelectVenueLocation,
   onLockInHotelDeal,
 }) => {
-  // Uses the Google Maps JS SDK when VITE_GOOGLE_MAPS_API_KEY is set; otherwise
-  // falls back to the keyless interactive embed so the map always works.
-  const rawMapsKey = String(import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? '').trim();
-  const envApiKey = rawMapsKey.length >= 20 && !/YOUR_|PLACEHOLDER/i.test(rawMapsKey) ? rawMapsKey : '';
-  const [selectedMapQuery, setSelectedMapQuery] = useState<string>(
-    event.location
-  );
-  const [activeMapMode, setActiveMapMode] = useState<'js_sdk' | 'embed'>(
-    'embed'
-  );
+  // Default: OpenStreetMap (keyless, permitted). The Google Maps JS SDK is used only when the USER
+  // supplies their own Maps key (their account, their billing, their Terms acceptance).
+  const [envApiKey, setEnvApiKey] = useState<string>(() => getMapsKey());
+  const [keyDraft, setKeyDraft] = useState('');
+  const [keyError, setKeyError] = useState<string | null>(null);
+  const [selectedMapQuery, setSelectedMapQuery] = useState<string>(event.location);
+  const [pin, setPin] = useState<{ lat: number; lng: number } | null>(null);
+  const [venuePoint, setVenuePoint] = useState<{ lat: number; lng: number } | null>(null);
+  const [geoFailed, setGeoFailed] = useState(false);
+  const [activeMapMode, setActiveMapMode] = useState<'js_sdk' | 'embed'>(envApiKey ? 'js_sdk' : 'embed');
 
   useEffect(() => {
     setSelectedMapQuery(event.location);
+    setPin(null);
   }, [event.location]);
 
+  // Geocode the venue (server-side, cached + rate-limited per the Nominatim policy)
   useEffect(() => {
-    if (envApiKey) {
-      setActiveMapMode('js_sdk');
-    }
-  }, [envApiKey]);
+    let cancelled = false;
+    setGeoFailed(false);
+    const t = setTimeout(async () => {
+      const res = await postJson<{ lat: number; lng: number }>('/api/geocode', { query: event.location }, { timeoutMs: 12_000 });
+      if (cancelled) return;
+      if (res.ok && Number.isFinite(res.data?.lat)) setVenuePoint({ lat: res.data.lat, lng: res.data.lng });
+      else {
+        setVenuePoint(null);
+        setGeoFailed(true);
+      }
+    }, 350);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [event.location]);
 
-  const embedUrl = `https://www.google.com/maps?q=${encodeURIComponent(
-    selectedMapQuery
-  )}&output=embed`;
+  const point = pin ?? venuePoint;
+  const saveMapsKey = () => {
+    if (!keyDraft.trim()) {
+      setMapsKey('');
+      setEnvApiKey(getMapsKey());
+      setActiveMapMode('embed');
+      setKeyError(null);
+      return;
+    }
+    if (!isValidMapsKey(keyDraft)) {
+      setKeyError('That does not look like a Google Maps API key.');
+      return;
+    }
+    setMapsKey(keyDraft);
+    setEnvApiKey(keyDraft.trim());
+    setActiveMapMode('js_sdk');
+    setKeyDraft('');
+    setKeyError(null);
+  };
 
   return (
     <div className="bg-white border border-stone-200/80 rounded-3xl p-7 sm:p-8 shadow-sm hover:shadow-md transition-shadow duration-200 space-y-6">
@@ -539,7 +571,7 @@ export const EventVenueAndHotelsMap: React.FC<EventVenueAndHotelsMapProps> = ({
           <div className="flex items-center gap-2 text-xs font-semibold text-[#4A6B53]">
             <Compass className="w-4 h-4" />
             <span>
-              Google Maps Platform · Venue &amp; Guest Hotel Spatial Explorer
+              Venue &amp; Guest Hotel Map
             </span>
           </div>
           <h3 className="text-xl font-bold text-stone-900">
@@ -547,8 +579,7 @@ export const EventVenueAndHotelsMap: React.FC<EventVenueAndHotelsMapProps> = ({
             {event.location.split('—')[0].trim()}
           </h3>
           <p className="text-xs text-stone-500 leading-relaxed">
-            Explore your event venue and compare nearby guest hotel locations,
-            shuttle distances, and surrounding landmarks on Google Maps.
+            Explore your event venue and nearby guest hotels on OpenStreetMap, or bring your own Google Maps key for the interactive Google map.
           </p>
         </div>
 
@@ -556,7 +587,10 @@ export const EventVenueAndHotelsMap: React.FC<EventVenueAndHotelsMapProps> = ({
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() => setSelectedMapQuery(event.location)}
+            onClick={() => {
+              setSelectedMapQuery(event.location);
+              setPin(null);
+            }}
             className={`px-3 py-1.5 text-xs font-semibold rounded-xl transition-colors ${
               selectedMapQuery === event.location
                 ? 'bg-[#B88B4A] text-white'
@@ -578,8 +612,8 @@ export const EventVenueAndHotelsMap: React.FC<EventVenueAndHotelsMapProps> = ({
               className="px-3 py-1.5 text-xs font-semibold rounded-xl bg-[#EDF3EE] text-[#4A6B53] hover:bg-[#DFECE1] transition-colors"
             >
               {activeMapMode === 'js_sdk'
-                ? 'Switch to Embed Map View'
-                : 'Switch to Interactive JS SDK Map'}
+                ? 'Switch to OpenStreetMap'
+                : 'Switch to Google Map (my key)'}
             </button>
           )}
 
@@ -596,6 +630,27 @@ export const EventVenueAndHotelsMap: React.FC<EventVenueAndHotelsMapProps> = ({
         </div>
       </div>
 
+      <details className="text-xs text-stone-500">
+        <summary className="cursor-pointer font-semibold text-stone-600">Use Google Maps with my own API key (optional)</summary>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <input
+            type="password"
+            autoComplete="off"
+            value={keyDraft}
+            onChange={(e) => setKeyDraft(e.target.value)}
+            placeholder={envApiKey ? 'Key saved — paste a new one or leave blank and Save to remove' : 'Maps JavaScript API key'}
+            className="flex-1 min-w-[220px] px-3 py-2 border border-stone-300 rounded-xl font-mono"
+          />
+          <button type="button" onClick={saveMapsKey} className="px-3.5 py-2 font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl">Save</button>
+        </div>
+        {keyError && <p role="alert" className="mt-1 text-rose-700">{keyError}</p>}
+        <p className="mt-1.5 leading-relaxed">
+          Stored only in this browser. Create a key in your own Google Cloud project and restrict it to this site
+          (HTTP referrers) — usage is billed to you under the{' '}
+          <a href="https://cloud.google.com/maps-platform/terms" target="_blank" rel="noopener noreferrer" className="text-[#4A6B53] hover:underline">Google Maps Platform Terms</a>.
+        </p>
+      </details>
+
       {/* Quick Filter Chips to Pin Any Discovered Nearby Hotel on the Map */}
       {liveHotelDeals.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 pt-1">
@@ -604,7 +659,10 @@ export const EventVenueAndHotelsMap: React.FC<EventVenueAndHotelsMapProps> = ({
           </span>
           <button
             type="button"
-            onClick={() => setSelectedMapQuery(event.location)}
+            onClick={() => {
+              setSelectedMapQuery(event.location);
+              setPin(null);
+            }}
             className={`px-3 py-1.5 text-xs font-semibold rounded-xl border transition-colors ${
               selectedMapQuery === event.location
                 ? 'bg-stone-900 text-white border-stone-900'
@@ -620,7 +678,10 @@ export const EventVenueAndHotelsMap: React.FC<EventVenueAndHotelsMapProps> = ({
               <button
                 key={deal.id}
                 type="button"
-                onClick={() => setSelectedMapQuery(dealQuery)}
+                onClick={() => {
+                            setSelectedMapQuery(dealQuery);
+                            setPin(typeof deal.lat === 'number' && typeof deal.lng === 'number' ? { lat: deal.lat, lng: deal.lng } : null);
+                          }}
                 className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl border transition-colors ${
                   isSelected
                     ? 'bg-[#4A6B53] text-white border-[#4A6B53]'
@@ -629,9 +690,11 @@ export const EventVenueAndHotelsMap: React.FC<EventVenueAndHotelsMapProps> = ({
               >
                 <Hotel className="w-3 h-3 shrink-0" />
                 <span>{deal.hotel_name}</span>
-                <span className="font-mono text-[11px] opacity-85">
-                  (${deal.price_per_night}/nt)
-                </span>
+                {deal.price_per_night > 0 && (
+                  <span className="font-mono text-[11px] opacity-85">
+                    (${deal.price_per_night}/nt)
+                  </span>
+                )}
               </button>
             );
           })}
@@ -655,13 +718,22 @@ export const EventVenueAndHotelsMap: React.FC<EventVenueAndHotelsMapProps> = ({
             style={{ height: '420px', width: '100%' }}
             className="lg:col-span-8 rounded-2xl overflow-hidden border border-stone-200/90 shadow-inner bg-[#FAF6EC] relative"
           >
-            <iframe
-              title={`Google Map for ${selectedMapQuery}`}
-              src={embedUrl}
-              className="w-full h-full border-0"
-              loading="lazy"
-              referrerPolicy="no-referrer-when-downgrade"
-            />
+            {point ? (
+              <iframe
+                title={`Map of ${selectedMapQuery}`}
+                src={osmEmbedUrl(point.lat, point.lng)}
+                className="w-full h-full border-0"
+                loading="lazy"
+                referrerPolicy="strict-origin-when-cross-origin"
+              />
+            ) : (
+              <div className="w-full h-full flex flex-col items-center justify-center gap-3 text-center p-6 text-xs text-stone-600">
+                <MapPin className="w-6 h-6 text-[#B88B4A]" />
+                {geoFailed
+                  ? 'We could not locate this venue on the map. Try a more specific address, or open it in Google Maps.'
+                  : 'Locating venue…'}
+              </div>
+            )}
           </div>
 
           <div className="lg:col-span-4 flex flex-col justify-between gap-4 bg-[#FAF6EC]/80 border border-stone-200/80 rounded-2xl p-5">
@@ -681,7 +753,7 @@ export const EventVenueAndHotelsMap: React.FC<EventVenueAndHotelsMapProps> = ({
 
               <div className="pt-2 border-t border-stone-200/70 space-y-2">
                 <div className="text-[11px] font-semibold uppercase tracking-wider text-stone-400">
-                  Nearby Hotel Deals ({liveHotelDeals.length})
+                  Nearby Hotels ({liveHotelDeals.length})
                 </div>
                 <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
                   {liveHotelDeals.map((deal) => {
@@ -693,21 +765,26 @@ export const EventVenueAndHotelsMap: React.FC<EventVenueAndHotelsMapProps> = ({
                       >
                         <button
                           type="button"
-                          onClick={() => setSelectedMapQuery(dealQuery)}
+                          onClick={() => {
+                            setSelectedMapQuery(dealQuery);
+                            setPin(typeof deal.lat === 'number' && typeof deal.lng === 'number' ? { lat: deal.lat, lng: deal.lng } : null);
+                          }}
                           className="text-left min-w-0 flex-1"
                         >
                           <div className="font-bold text-stone-900 truncate">
                             {deal.hotel_name}
                           </div>
                           <div className="text-[11px] text-stone-500 truncate">
-                            {deal.distance_from_venue} · ★{' '}
-                            {deal.star_rating.toFixed(1)}
+                            {deal.distance_from_venue}
+                            {deal.star_rating > 0 ? ` · ${deal.star_rating.toFixed(0)}★` : ''}
                           </div>
                         </button>
                         <div className="text-right shrink-0 space-y-1">
-                          <div className="font-mono font-bold text-[#4A6B53]">
-                            ${deal.price_per_night}/nt
-                          </div>
+                          {deal.price_per_night > 0 && (
+                            <div className="font-mono font-bold text-[#4A6B53]">
+                              ${deal.price_per_night}/nt
+                            </div>
+                          )}
                           {onLockInHotelDeal && (
                             <button
                               type="button"
@@ -727,15 +804,23 @@ export const EventVenueAndHotelsMap: React.FC<EventVenueAndHotelsMapProps> = ({
 
             <div className="pt-3 border-t border-stone-200/70 text-[11px] text-stone-500 flex items-center justify-between gap-2">
               <span>
-                Powered by{' '}
+                Map ©{' '}
                 <a
-                  href="https://developers.google.com/maps/documentation/javascript?utm_campaign=gmp_mcp_codeassist_v1_aistudio"
+                  href="https://www.openstreetmap.org/copyright"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="font-semibold text-[#4A6B53] hover:underline"
                 >
-                  Google Maps Platform
+                  OpenStreetMap contributors
                 </a>
+                {point && (
+                  <>
+                    {' · '}
+                    <a href={osmViewUrl(point.lat, point.lng)} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                      larger map
+                    </a>
+                  </>
+                )}
               </span>
               <a
                 href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(

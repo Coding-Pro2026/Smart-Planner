@@ -7,21 +7,20 @@ import {
   ShieldCheck,
   X,
 } from 'lucide-react';
-import { FullVerificationReport } from '../tests/runAuditSuite';
-import { ModelRoutingConfig } from '../types/domain';
+import type { FullVerificationReport } from '../tests/runAuditSuite';
 
 interface SecurityAuditModalProps {
   isOpen: boolean;
   onClose: () => void;
-  routingConfig: ModelRoutingConfig;
-  onUpdateRoutingConfig: (next: ModelRoutingConfig) => Promise<void>;
+  aiStatusLabel: string;
+  onOpenAiSettings: () => void;
 }
 
 export const SecurityAuditModal: React.FC<SecurityAuditModalProps> = ({
   isOpen,
   onClose,
-  routingConfig,
-  onUpdateRoutingConfig,
+  aiStatusLabel,
+  onOpenAiSettings,
 }) => {
   const [report, setReport] = useState<FullVerificationReport | null>(null);
   const [vaultStatus, setVaultStatus] = useState<{
@@ -31,7 +30,6 @@ export const SecurityAuditModal: React.FC<SecurityAuditModalProps> = ({
     serverGeminiConfigured: boolean;
   } | null>(null);
   const [isRunningAudit, setIsRunningAudit] = useState(false);
-  const [isSavingRouting, setIsSavingRouting] = useState(false);
   const [saveBanner, setSaveBanner] = useState<string | null>(null);
 
   const fetchAuditAndVault = async () => {
@@ -64,23 +62,6 @@ export const SecurityAuditModal: React.FC<SecurityAuditModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleSaveRouting = async (next: ModelRoutingConfig) => {
-    setIsSavingRouting(true);
-    setSaveBanner(null);
-    try {
-      await onUpdateRoutingConfig(next);
-      const vaultRes = await fetch('/api/vault/status');
-      if (!vaultRes.ok) throw new Error('vault status unavailable');
-      const vaultData = await vaultRes.json();
-      setVaultStatus(vaultData);
-      setSaveBanner('Encrypted model routing profile sealed in AES-256-GCM server vault.');
-    } catch {
-      setSaveBanner('Could not save the routing profile. Please try again.');
-    } finally {
-      setIsSavingRouting(false);
-    }
-  };
-
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
       <div className="bg-white border border-slate-200 rounded-xl max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden shadow-xl">
@@ -106,95 +87,36 @@ export const SecurityAuditModal: React.FC<SecurityAuditModalProps> = ({
         </div>
 
         <div className="p-6 overflow-y-auto space-y-6">
-          {/* Part 1: Model Routing & Server-Side AES-256-GCM Envelope Vault */}
-          <div className="p-5 bg-slate-50 border border-slate-200 rounded-lg space-y-4">
+          {/* Part 1: Bring-your-own-key AI status + envelope vault info */}
+          <div className="p-5 bg-slate-50 border border-slate-200 rounded-lg space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
                   <Cpu className="w-4 h-4 text-indigo-600" />
-                  Task-Specific Model Routing & AES-256-GCM Envelope Encryption
+                  AI Provider (Bring Your Own Key)
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Server-side credentials are automatically managed via environment secrets and never exposed to client bundles
+                  Currently using: <strong className="text-slate-800">{aiStatusLabel}</strong>. Keys stay in your browser and are never stored or logged by the server.
                 </p>
               </div>
-              {vaultStatus && (
-                <span className="text-xs font-mono text-emerald-700 font-medium flex items-center gap-1">
-                  <Lock className="w-3.5 h-3.5" />
-                  {vaultStatus.cipherSuite}
-                </span>
-              )}
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onOpenAiSettings();
+                }}
+                className="px-3 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-md"
+              >
+                Configure AI
+              </button>
             </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
-              <div>
-                <label className="block font-medium text-slate-700 mb-1">
-                  Fast Categorization & Checklist Model
-                </label>
-                <select
-                  value={routingConfig.fastTaskProfile}
-                  onChange={(e) =>
-                    handleSaveRouting({
-                      ...routingConfig,
-                      fastTaskProfile: e.target.value as ModelRoutingConfig['fastTaskProfile'],
-                    })
-                  }
-                  disabled={isSavingRouting}
-                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-md font-mono text-xs"
-                >
-                  <option value="gemini-3.8-flash">Balanced Fast (Gemini 2.5 Flash)</option>
-                  <option value="gemini-3.1-flash-lite">Ultra-Low Latency (Gemini 2.5 Flash-Lite)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block font-medium text-slate-700 mb-1">
-                  Multimodal Vision & Contract OCR Model
-                </label>
-                <select
-                  value={routingConfig.reasoningVisionProfile}
-                  onChange={(e) =>
-                    handleSaveRouting({
-                      ...routingConfig,
-                      reasoningVisionProfile: e.target.value as ModelRoutingConfig['reasoningVisionProfile'],
-                    })
-                  }
-                  disabled={isSavingRouting}
-                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-md font-mono text-xs"
-                >
-                  <option value="gemini-3.8-flash">Multimodal Structured (Gemini 2.5 Flash)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block font-medium text-slate-700 mb-1">
-                  Vault Storage Mode
-                </label>
-                <select
-                  value={routingConfig.encryptionMode}
-                  onChange={(e) =>
-                    handleSaveRouting({
-                      ...routingConfig,
-                      encryptionMode: e.target.value as ModelRoutingConfig['encryptionMode'],
-                    })
-                  }
-                  disabled={isSavingRouting}
-                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-md text-xs"
-                >
-                  <option value="aes_256_gcm_vault">AES-256-GCM Envelope Vault (HKDF)</option>
-                  <option value="session_memory">Ephemeral Session Memory</option>
-                </select>
-              </div>
-            </div>
-
-            {vaultStatus?.envelopePreview && (
-              <div className="text-[11px] font-mono text-slate-500 flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200">
-                <span>
-                  Tenant ID: <strong className="text-slate-800">{vaultStatus.tenantId}</strong> · Sealed Envelope Ciphertext: {vaultStatus.envelopePreview}
-                </span>
-                {saveBanner && <span className="text-emerald-700">{saveBanner}</span>}
+            {vaultStatus && (
+              <div className="text-[11px] font-mono text-slate-500 flex flex-wrap items-center gap-2 pt-2 border-t border-slate-200">
+                <Lock className="w-3.5 h-3.5 text-emerald-700" />
+                <span>{vaultStatus.cipherSuite}</span>
               </div>
             )}
+            {saveBanner && <p role="alert" className="text-xs text-rose-700">{saveBanner}</p>}
           </div>
 
           {/* Part 2: Live 9-Check Unit & Security Verification Suite */}
