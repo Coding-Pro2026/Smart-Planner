@@ -117,6 +117,11 @@ async function call(cfg: AiConfig, params: GenerateParams, fetcher: Fetcher, tim
   };
 
   let { res, data } = await send(true);
+  // One quick retry for transient provider overload / rate-limit responses.
+  if ([429, 500, 502, 503, 504].includes(res.status)) {
+    await new Promise((r) => setTimeout(r, 1200));
+    ({ res, data } = await send(true));
+  }
   // Some OpenAI-compatible servers reject response_format; retry once without it.
   if (res.status === 400 && norm.wantJson && ['openrouter', 'custom'].includes(cfg.provider)) {
     ({ res, data } = await send(false));

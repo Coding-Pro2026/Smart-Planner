@@ -34,6 +34,7 @@ import { safeHttpUrl } from './src/lib/url';
 import { geocode, findHotelsNear } from './src/server/geo';
 import { AiClient, createAiClient, listModels, resolveAiConfig, testConnection, validateAiConfig } from './src/server/aiClient';
 import { extractJson, isProviderId, redactSecret } from './src/lib/llm/providers';
+import { cleanTitle, sanitizeMoodboard, sanitizeOrchestratorOutput } from './src/lib/llm/sanitize';
 
 dotenv.config();
 
@@ -79,7 +80,7 @@ function noteAiFailure(context: string, err: unknown, ai: AiClient | null, res: 
 }
 
 /** Runs a Gemini call with a hard timeout so a hung upstream never hangs a request. */
-async function withTimeout<T>(p: Promise<T>, ms = 30_000): Promise<T> {
+async function withTimeout<T>(p: Promise<T>, ms = 42_000): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   try {
     return await Promise.race([
@@ -350,25 +351,16 @@ IMPORTANT ARCHITECTURE RULE:
         }));
 
         const parsed = parseModelJson(response.text);
-        const actions: ProposedToolAction[] = Array.isArray(parsed.proposed_actions)
-          ? parsed.proposed_actions.map((act: Record<string, unknown>, idx: number) => ({
-              id: `act_${Date.now()}_${idx}`,
-              tool_name: (act.tool_name as ProposedToolAction['tool_name']) || 'create_task',
-              agent: (act.agent as AgentName) || 'Logistics & Timeline Agent',
-              summary: String(act.summary || 'Apply recommended planning update'),
-              payload: act,
-            }))
-          : [];
+        const clean = sanitizeOrchestratorOutput(parsed);
+        const actions: ProposedToolAction[] = clean.actions.map((act, idx) => ({
+          id: `act_${Date.now()}_${idx}`,
+          ...act,
+        }));
 
         res.json({
-          sender_agent: parsed.sender_agent || 'Supervisor Agent',
-          delegated_agents: parsed.delegated_agents || [
-            'Budget Allocator Agent',
-            'Logistics & Timeline Agent',
-          ],
-          content: redactSensitiveStrings(
-            String(parsed.reply_markdown || 'Orchestration complete.')
-          ),
+          sender_agent: clean.sender_agent,
+          delegated_agents: clean.delegated_agents,
+          content: redactSensitiveStrings(clean.reply),
           checkpoint_id: checkpointId,
           sanitizationWarnings: sanitization.warnings,
           proposed_actions: actions,
@@ -595,32 +587,13 @@ ${sanitized.sanitizedText}`,
         }));
 
         const parsed = parseModelJson(response.text);
-        const palette: MoodboardPalette = {
-          id: `mb_${Date.now()}`,
-          event_id: String(eventId || 'evt_unknown'),
-          title: parsed.title || 'Bespoke Editorial Scenography',
-          style_archetype: parsed.style_archetype || 'Modern Architectural Organic',
-          color_Swatches: Array.isArray(parsed.color_Swatches) && parsed.color_Swatches.length > 0
-            ? parsed.color_Swatches
-            : [
-                { hex: '#4A5D4E', name: 'Cypress Sage', usage: 'Table linens & foliage' },
-                { hex: '#C67D5A', name: 'Terracotta Clay', usage: 'Ceramic vessels' },
-                { hex: '#F3EFEA', name: 'Alabaster Silk', usage: 'Drapery & menus' },
-                { hex: '#D4AF37', name: 'Brushed Brass', usage: 'Cutlery & candlesticks' },
-                { hex: '#1F2421', name: 'Charcoal Slate', usage: 'Signage & typography' },
-              ],
-          decor_elements: Array.isArray(parsed.decor_elements)
-            ? parsed.decor_elements
-            : ['Raw travertine plinths', 'Hand-dipped beeswax tapers'],
-          lighting_atmosphere:
-            parsed.lighting_atmosphere || '2200K warm candlelit glow with architectural uplighting.',
-          floral_botanical_notes: Array.isArray(parsed.floral_botanical_notes)
-            ? parsed.floral_botanical_notes
-            : ['Sculptural olive branches', 'Garden roses & dried grasses'],
-          culinary_dietary_pairings: Array.isArray(parsed.culinary_dietary_pairings)
-            ? parsed.culinary_dietary_pairings
-            : ['Artisanal grazing table with gluten-free & vegan markers'],
-        };
+        // Small models often return malformed swatches/titles: validate, else use the local generator.
+        const palette: MoodboardPalette =
+          sanitizeMoodboard(parsed, String(eventId || 'evt_unknown')) ?? {
+            ...generateMoodboard({ prompt: cleanPrompt, eventId: String(eventId || 'evt_unknown') }),
+            // keep a usable model-written title even when the palette itself was unusable
+            ...(typeof parsed?.title === 'string' && cleanTitle(parsed.title, '', 70) ? { title: cleanTitle(parsed.title, '', 70) } : {}),
+          };
 
         res.json(palette);
         return;
@@ -1028,7 +1001,7 @@ Instructions:
 
         const parsed = parseModelJson(response.text);
         const draft = parsed.event_draft || {};
-        const finalTitle = String(draft.title || detectedTitle);
+        const finalTitle = cleanTitle(draft.title, detectedTitle, 80);
         const finalType = String(draft.event_type || detectedType).toLowerCase();
         const finalLocation = String(draft.location || detectedLocation);
         const finalDays = Math.max(1, Math.min(14, Number(draft.event_days) || detectedDays));

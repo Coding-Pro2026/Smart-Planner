@@ -13,6 +13,7 @@ import {
 import { isPrivateIp, safeRequest } from '../server/netGuard';
 import { createAiClient, validateAiConfig, listModels } from '../server/aiClient';
 import { Type } from '../lib/llm/schemaType';
+import { cleanTitle, sanitizeMoodboard, sanitizeOrchestratorOutput } from '../lib/llm/sanitize';
 
 let passed = 0;
 let failed = 0;
@@ -126,7 +127,7 @@ async function main() {
     assert.throws(() => validateAiConfig({ provider: 'custom', model: 'm', baseUrl: 'http://example.com/v1' }), /https/);
     assert.throws(() => validateAiConfig({ provider: 'custom', model: 'm', baseUrl: 'https://u:p@example.com/v1' }), /credentials/);
     assert.equal(validateAiConfig({ provider: 'custom', model: 'm', baseUrl: 'https://api.groq.com/openai/v1/' }).baseUrl, 'https://api.groq.com/openai/v1');
-    assert.equal(validateAiConfig({ provider: 'gemini', apiKey: KEY }).model, 'gemini-2.5-flash');
+    assert.equal(validateAiConfig({ provider: 'gemini', apiKey: KEY }).model, 'gemini-3.1-flash-lite');
   });
 
   await check('SSRF: private, loopback, metadata & mapped IPs are classified private', () => {
@@ -181,6 +182,18 @@ async function main() {
     const m = await listModels({ provider: 'anthropic', apiKey: KEY, model: 'x' }, fetcher);
     assert.ok(seen.startsWith('https://api.anthropic.com/v1/models'));
     assert.deepEqual(m.map((x) => x.id), ['claude-a', 'claude-b']);
+  });
+
+  await check('Model output sanitizers reject malformed/off-spec fields', () => {
+    const o = sanitizeOrchestratorOutput({ sender_agent: 'Supervisor Agent PlanGenie coordination unit v1.0.0.0', delegated_agents: ['Nope', 'Budget Allocator Agent'], reply_markdown: 'hi', proposed_actions: [{ tool_name: 'rm_rf', summary: 'x' }, { tool_name: 'add_budget_item', agent: 'Evil', summary: 's' }] });
+    assert.equal(o.sender_agent, 'Supervisor Agent');
+    assert.deepEqual(o.delegated_agents, ['Budget Allocator Agent']);
+    assert.equal(o.actions.length, 1);
+    assert.equal(o.actions[0].agent, 'Logistics & Timeline Agent');
+    assert.equal(sanitizeMoodboard({ title: 'T', color_Swatches: [{ hex: 'red' }, { hex: '#12' }] }, 'e'), null);
+    assert.equal(sanitizeMoodboard({ title: 'Sage Edit:525252,color_Swatches:[{hex:', color_Swatches: ['#4A5D4E', '#C67D5A', '#F3EFEA'].map((hex) => ({ hex, name: 'n', usage: 'u' })) }, 'e')!.title, 'Custom Palette');
+    assert.equal(cleanTitle('x'.repeat(300), 'fb', 40).length, 40);
+    assert.equal(cleanTitle('{"a":1}', 'fb'), 'fb');
   });
 
   console.log(`\nAI layer: ${passed}/${passed + failed} checks passed`);

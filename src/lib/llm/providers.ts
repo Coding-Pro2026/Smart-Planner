@@ -22,8 +22,9 @@ export const PROVIDERS: Record<ProviderId, ProviderMeta> = {
   gemini: {
     id: 'gemini',
     label: 'Google Gemini',
-    defaultModel: 'gemini-2.5-flash',
-    suggestedModels: ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro'],
+    // Google retires models quickly (e.g. 2.5 is closed to new users) - "Load my models" shows what your key can use.
+    defaultModel: 'gemini-3.1-flash-lite',
+    suggestedModels: ['gemini-3.1-flash-lite', 'gemini-flash-latest', 'gemini-pro-latest'],
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
     needsKey: true,
     needsBaseUrl: false,
@@ -380,6 +381,7 @@ export function parseModelList(provider: ProviderId, data: any): ModelOption[] {
   if (provider === 'gemini') {
     out = (data?.models ?? [])
       .filter((m: any) => (m?.supportedGenerationMethods ?? []).includes('generateContent'))
+      .filter((m: any) => !/(tts|image|transcribe|lyria|robotics|computer-use|embedding|nano-banana)/i.test(String(m.name)))
       .map((m: any) => ({ id: String(m.name).replace(/^models\//, ''), label: m.displayName }));
   } else if (provider === 'anthropic') {
     out = (data?.data ?? []).map((m: any) => ({ id: String(m.id), label: m.display_name }));

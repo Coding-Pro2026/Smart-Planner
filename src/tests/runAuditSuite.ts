@@ -463,6 +463,8 @@ export function runAllVerificationSuites(): FullVerificationReport {
     const add = buildLocalAssistantReply('Add a DJ for $1,200', ctx).proposed_actions[0];
     if (add?.tool_name !== 'add_budget_item' || add.payload.unit_cost !== 1200) throw new Error('Budget intent wrong');
     if (add.payload.name !== 'DJ') throw new Error(`Item name not cleaned: ${add.payload.name}`);
+    const multi = buildLocalAssistantReply('Add a $900 DJ for the reception and delay the venue contract by 1 week', ctx).proposed_actions.map((a) => a.tool_name);
+    if (multi.join() !== 'add_budget_item,shift_schedule') throw new Error(`Compound request not split: ${multi}`);
     const perGuest = buildLocalAssistantReply('add late night snacks $12 per guest', ctx).proposed_actions[0];
     if (perGuest?.payload.quantity !== 100 || perGuest.payload.is_per_guest !== true) throw new Error('Per-guest intent wrong');
     return 'Matched tasks by name, parsed day/week deltas and $ amounts (incl. per-guest) into structured tool proposals.';
