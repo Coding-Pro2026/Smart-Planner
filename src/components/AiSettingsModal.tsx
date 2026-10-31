@@ -265,7 +265,7 @@ export function AiSettingsModal({
             <p className="leading-relaxed">
               Your key stays in this browser and is sent over HTTPS only to the PlanGenie server you are using, which uses it for
               your requests to {meta.label} and never stores or logs it. Usage is billed by your provider to you.
-              Your event details (names, budget, notes) are sent to that provider to generate answers.
+              Your event details (names, budget, notes) are sent to that provider to generate answers. See the <a href="/privacy" target="_blank" rel="noopener noreferrer" className="underline">Privacy Policy</a>.
             </p>
           </div>
 

@@ -915,6 +915,8 @@ export const ProductLandingPageView: React.FC<ProductLandingPageViewProps> = ({
             PlanGenie — Smart Event Planning, Custom Cultural Tabs, Nearby Hotels &amp; Calendar Invites
           </div>
           <div className="flex items-center gap-6">
+            <a href="/privacy" className="hover:text-stone-900 transition-colors">Privacy</a>
+            <a href="/terms" className="hover:text-stone-900 transition-colors">Terms</a>
             <button
               type="button"
               onClick={() => onStartWithAiChat()}

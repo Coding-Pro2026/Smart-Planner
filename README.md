@@ -86,6 +86,13 @@ terminate TLS at your proxy/platform and set `TRUST_PROXY=1`, point health check
 The app is stateless server-side (plans live in the user's browser), so it scales horizontally; note the rate limiter
 is per-instance.
 
+## Privacy Policy & Terms
+Published in-app at `/privacy` and `/terms` (linked from every footer and the AI Settings dialog). Before going public, set
+`VITE_LEGAL_OPERATOR`, `VITE_LEGAL_EMAIL` (and optionally `VITE_LEGAL_ADDRESS`, `VITE_LEGAL_GOVERNING_LAW`) at build time —
+until then the pages show a configuration notice. For Docker pass them as `--build-arg`. They describe the app's real data flows
+(browser-only storage, BYOK, OpenStreetMap, Google Fonts/Calendar); update them if you add analytics, accounts or server storage.
+They are a template, not legal advice — have counsel review.
+
 ## Security notes
 
 - No secrets in source; `.env*` is git-ignored; no key material is hard-coded (random per-process key if none configured).

@@ -81,6 +81,7 @@ import { ToastStack, ToastMessage } from './components/ToastStack';
 import { ReadinessCard } from './components/ReadinessCard';
 import { ExportMenu } from './components/ExportMenu';
 import { AiSettingsModal } from './components/AiSettingsModal';
+import { LegalView } from './components/LegalView';
 import { AI_CONFIG_EVENT, AI_WARNING_EVENT, aiLabel, isAiConfigured, loadAiConfig } from './lib/aiConfig';
 import { KeyRound } from 'lucide-react';
 import { VendorChecklistView } from './components/VendorChecklistView';
@@ -1350,6 +1351,12 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  // Legal pages are plain URLs (/privacy, /terms) so they can be linked from anywhere.
+  const legalPath = window.location.pathname.replace(/\/+$/, '');
+  if (legalPath === '/privacy' || legalPath === '/terms') {
+    return <LegalView doc={legalPath === '/privacy' ? 'privacy' : 'terms'} />;
+  }
+
   // Shared overlays for every screen: AI settings dialog, toasts and (outside the workspace) a key chip.
   const aiOverlays = (showChip: boolean) => (
     <>
@@ -2381,6 +2388,8 @@ export default function App() {
             >
               How PlanGenie Works (Architecture)
             </button>
+            <a href="/privacy" className="hover:text-stone-900 transition-colors">Privacy</a>
+            <a href="/terms" className="hover:text-stone-900 transition-colors">Terms</a>
             <button
               type="button"
               onClick={handleResetWorkspace}

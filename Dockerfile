@@ -6,6 +6,11 @@ WORKDIR /app
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 COPY . .
+# Legal-page operator details are baked in at build time (docker build --build-arg VITE_LEGAL_OPERATOR=... )
+ARG VITE_LEGAL_OPERATOR
+ARG VITE_LEGAL_EMAIL
+ARG VITE_LEGAL_ADDRESS
+ARG VITE_LEGAL_GOVERNING_LAW
 RUN bun run build
 
 # ---- prod deps only ----
