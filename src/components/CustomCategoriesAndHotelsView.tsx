@@ -1367,6 +1367,7 @@ export const CustomCategoriesAndHotelsView: React.FC<
             </div>
             <div className="grid grid-cols-2 gap-2.5">
               <select
+                aria-label="New category type"
                 value={newCatType}
                 onChange={(e) =>
                   setNewCatType(e.target.value as CustomModuleType)

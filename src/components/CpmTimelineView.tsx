@@ -186,6 +186,7 @@ export const CpmTimelineView: React.FC<CpmTimelineViewProps> = ({
                 Happens After (Optional)
               </label>
               <select
+                aria-label="Task that must finish first"
                 value={selectedDep}
                 onChange={(e) => setSelectedDep(e.target.value)}
                 className="w-full px-3 py-2 text-xs border border-stone-300 rounded-xl bg-white"

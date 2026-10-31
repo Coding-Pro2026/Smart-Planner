@@ -301,6 +301,7 @@ export const VendorMatrixView: React.FC<VendorMatrixViewProps> = ({
                     </h3>
                   </div>
                   <select
+                    aria-label={`Booking status for ${vendor.name}`}
                     value={vendor.status}
                     onChange={(e) =>
                       onUpdateVendorStatus(vendor.id, e.target.value as VendorStatus)

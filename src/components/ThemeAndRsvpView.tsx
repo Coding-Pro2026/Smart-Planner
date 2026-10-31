@@ -788,6 +788,7 @@ export const ThemeAndRsvpView: React.FC<ThemeAndRsvpViewProps> = ({
                     </td>
                     <td className="py-3.5 px-7 text-right">
                       <select
+                        aria-label={`RSVP status for ${rsvp.guest_name}`}
                         value={rsvp.status}
                         onChange={(e) =>
                           onUpdateRsvpStatus(rsvp.id, e.target.value as RsvpStatus)

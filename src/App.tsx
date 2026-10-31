@@ -329,8 +329,9 @@ export default function App() {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const pushToast = useCallback((kind: ToastMessage['kind'], text: string) => {
     const id = `t_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-    setToasts((prev) => [...prev.slice(-3), { id, kind, text }]);
-    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 5000);
+    // A new message replaces older ones so stale toasts can't be mistaken for the latest result.
+    setToasts([{ id, kind, text }]);
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), kind === 'error' ? 7000 : 4000);
   }, []);
   const dismissToast = useCallback(
     (id: string) => setToasts((prev) => prev.filter((t) => t.id !== id)),
