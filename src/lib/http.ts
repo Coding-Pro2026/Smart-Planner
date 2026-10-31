@@ -66,8 +66,22 @@ export function isAllowedRequestOrigin(h: Pick<Headers, "get">, method: string, 
   return hosts.includes(originHost);
 }
 
+/** Human-readable reason for a rejection, so a legitimate user behind a proxy can fix their setup in one step. */
+export function describeOriginRejection(h: Pick<Headers, "get">): string {
+  const site = h.get("sec-fetch-site");
+  let origin = h.get("origin") ?? "";
+  try {
+    origin = new URL(origin).origin;
+  } catch {
+    origin = origin ? "(unparseable)" : "(none)";
+  }
+  const host = h.get("x-forwarded-host") ?? h.get("host") ?? "(unknown)";
+  return `Cross-origin request blocked (Origin: ${origin.slice(0, 120)}, server host: ${host.slice(0, 120)}, Sec-Fetch-Site: ${site ?? "not sent"}). ` +
+    `If you opened the app through a proxy, tunnel or different hostname, add its address to ALLOWED_ORIGINS in .env (e.g. ALLOWED_ORIGINS="${origin.slice(0, 120)}") and restart.`;
+}
+
 function assertSameOrigin(req: NextRequest) {
-  if (!isAllowedRequestOrigin(req.headers, req.method)) throw new HttpError(403, "Cross-origin request blocked");
+  if (!isAllowedRequestOrigin(req.headers, req.method)) throw new HttpError(403, describeOriginRejection(req.headers));
 }
 
 export async function currentUser() {
