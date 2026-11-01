@@ -407,6 +407,16 @@ export function runAllVerificationSuites(): FullVerificationReport {
     if (t.total_true_cost !== expected) throw new Error(`True cost ${t.total_true_cost} != ${expected}`);
     if (!t.risk_clauses.some((c) => /non-refundable/i.test(c.clause))) throw new Error('Missed non-refundable clause');
     if (parseQuoteText('no prices here').base_fee !== 0) throw new Error('Should not invent a price');
+    // Prose-style quotes: each percentage must be matched to its OWN clause, never to a neighbouring one.
+    const p1 = parseQuoteText('Base package: $8,400. Mandatory 21% service charge applies. 8.5% sales tax. 50% non-refundable retainer upon signature.');
+    if (p1.service_charge_pct !== 21 || p1.tax_pct !== 8.5 || p1.gratuity_pct !== 0) {
+      throw new Error(`Prose quote mis-assigned percentages: svc ${p1.service_charge_pct}, tax ${p1.tax_pct}, grat ${p1.gratuity_pct}`);
+    }
+    const p2 = parseQuoteText('Package: $9,600.00\n- Mandatory 21% Studio Production & Rigging Service Charge applies to all items.\n- 4% Lead Florist Gratuity + 8.5% California Sales Tax.\n- 50% non-refundable retainer.');
+    if (p2.service_charge_pct !== 21 || p2.gratuity_pct !== 4 || p2.tax_pct !== 8.5) {
+      throw new Error(`Bulleted quote mis-assigned percentages: svc ${p2.service_charge_pct}, grat ${p2.gratuity_pct}, tax ${p2.tax_pct}`);
+    }
+    if (parseQuoteText('Package $1,000. Please multiple-check the tipping policy. 30% deposit.').gratuity_pct !== 0) throw new Error('"tip" matched inside another word');
     return 'Computed $7,625 true cost from the pasted quote and flagged the non-refundable deposit; no prices => no invented numbers.';
   });
 

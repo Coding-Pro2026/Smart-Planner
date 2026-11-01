@@ -2,6 +2,14 @@
   "name": "plangenie",
   "private": true,
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Coding-Pro2026/Smart-Planner.git"
+  },
+  "homepage": "https://github.com/Coding-Pro2026/Smart-Planner#readme",
+  "bugs": {
+    "url": "https://github.com/Coding-Pro2026/Smart-Planner/issues"
+  },
   "version": "1.0.0",
   "type": "module",
   "scripts": {
