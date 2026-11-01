@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { EventRecord, ParsedVendorTerms, VendorRecord, VendorStatus } from '../types/domain';
 import { postJson } from '../lib/api';
+import { Button, Card, EmptyState, Field, PageHeader, cx, inputCls } from './ui/kit';
 
 interface VendorMatrixViewProps {
   event: EventRecord;
@@ -120,279 +121,216 @@ export const VendorMatrixView: React.FC<VendorMatrixViewProps> = ({
     setParseFeedback(
       `Analyzed ${name}: found ${
         data.parsed_terms.hidden_fees_detected?.length ?? 0
-      } hidden fee(s) and ${data.parsed_terms.risk_clauses?.length ?? 0} clause(s) to review. True total cost is $${total.toLocaleString()}.`
+      } hidden fee(s) and ${data.parsed_terms.risk_clauses?.length ?? 0} clause(s) to review. True total cost is $${total.toLocaleString('en-US')}.`
     );
     setRawQuoteText('');
     setVendorName('');
     setShowAnalyzerDrawer(false);
   };
 
-  return (
-    <div className="space-y-8">
-      {/* Clean Header & "+ Analyze Vendor Quote" Button */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-stone-900">Vendors &amp; Quote Comparison</h1>
-          <p className="text-sm text-stone-500 mt-0.5">
-            Compare advertised base prices against true all-in costs (including hidden fees, service charges, and taxes).
-          </p>
-        </div>
+  const money = (n: number) => `$${(Number(n) || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+  const booked = vendors.filter((v) => v.status === 'booked').length;
 
-        <button
-          type="button"
-          onClick={() => setShowAnalyzerDrawer((prev) => !prev)}
-          className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition-colors shadow-2xs whitespace-nowrap shrink-0"
-        >
-          <Plus className="w-4 h-4" />
-          {showAnalyzerDrawer ? 'Close Quote Analyzer' : 'Analyze New Vendor Quote'}
-        </button>
-      </div>
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        icon={<Scale className="h-4 w-4" />}
+        eyebrow="Vendors"
+        title="Vendors & quote comparison"
+        description="Compare advertised prices against true all-in costs, including hidden fees, service charges and taxes."
+        stat={vendors.length ? { value: `${booked}/${vendors.length}`, label: 'vendors booked' } : undefined}
+        actions={
+          <Button variant="primary" aria-expanded={showAnalyzerDrawer} aria-controls="quote-analyzer" onClick={() => setShowAnalyzerDrawer((prev) => !prev)}>
+            <Plus aria-hidden="true" className="h-4 w-4" />
+            {showAnalyzerDrawer ? 'Close analyzer' : 'Analyze a quote'}
+          </Button>
+        }
+      />
 
       {parseFeedback && (
         <div
           role={parseFailed ? 'alert' : 'status'}
-          className={`p-4 rounded-xl border flex items-center justify-between text-xs font-medium ${
+          className={cx(
+            'flex items-center justify-between gap-4 rounded-xl border p-4 text-sm',
             parseFailed
-              ? 'bg-rose-50 border-rose-200 text-rose-900'
-              : 'bg-emerald-50 border-emerald-200 text-emerald-900'
-          }`}
+              ? 'border-rose-200 bg-rose-50 text-rose-900 dark:border-rose-800 dark:bg-rose-950 dark:text-rose-200'
+              : 'border-[#C9DDCF] bg-[#EEF4EF] text-[#2F4A38] dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200'
+          )}
         >
-          <span className="inline-flex items-center gap-2">
-            {parseFailed ? (
-              <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-            ) : (
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-            )}
+          <span className="flex items-start gap-3">
+            {parseFailed ? <AlertTriangle aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0" /> : <CheckCircle2 aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0" />}
             {parseFeedback}
           </span>
-          <button
-            onClick={() => setParseFeedback(null)}
-            className="text-emerald-700 hover:underline ml-4"
-          >
+          <Button variant="ghost" className="!h-8 shrink-0" onClick={() => setParseFeedback(null)}>
             Dismiss
-          </button>
+          </Button>
         </div>
       )}
 
-      {/* Collapsible Quote Analyzer Panel */}
       {showAnalyzerDrawer && (
-        <div className="bg-white border border-stone-200 rounded-2xl p-6 space-y-5 shadow-xs">
-          <div className="flex flex-wrap items-center justify-between gap-4 border-b border-stone-100 pb-4">
-            <div>
-              <h2 className="text-base font-bold text-stone-900 flex items-center gap-2">
-                <FileSearch className="w-4 h-4 text-indigo-600" />
-                AI Contract &amp; Quote Analyzer
-              </h2>
-              <p className="text-xs text-stone-500 mt-0.5">
-                Paste a vendor quote or upload a contract to automatically spot hidden fees and calculate the true total price for {event.title}.
+        <Card as="div" className="p-6" id="quote-analyzer">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="max-w-xl">
+              <h3 className="flex items-center gap-2 text-base font-semibold leading-6 text-stone-900">
+                <FileSearch aria-hidden="true" className="h-4 w-4 text-[#3B5943] dark:text-emerald-300" />
+                Contract & quote analyzer
+              </h3>
+              <p className="mt-1 text-sm leading-5 text-stone-600">
+                Paste a vendor quote or upload a text file to spot hidden fees and calculate the true price for {event.title}.
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleLoadSampleQuote}
-                className="px-3.5 py-2 text-xs font-medium text-stone-700 bg-stone-100 hover:bg-stone-200 rounded-xl transition-colors whitespace-nowrap"
+              <Button onClick={handleLoadSampleQuote}>Try a sample</Button>
+              <label
+                className={cx(
+                  'inline-flex h-9 cursor-pointer items-center gap-2 rounded-lg border border-stone-300 bg-white px-4 text-sm font-medium text-stone-900 transition-colors hover:border-stone-400 hover:bg-stone-50 focus-within:ring-2 focus-within:ring-[#4A6B53] focus-within:ring-offset-2'
+                )}
               >
-                Try with Sample Quote
-              </button>
-              <label className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-xl cursor-pointer transition-colors whitespace-nowrap">
-                <Upload className="w-3.5 h-3.5" />
-                Upload File
-                <input
-                  type="file"
-                  accept=".pdf,.txt,.md,.json"
-                  onChange={handleFileUpload}
-                  className="hidden"
-                />
+                <Upload aria-hidden="true" className="h-4 w-4" />
+                Upload file
+                <input type="file" accept=".txt,.md,.json,.csv,.eml,.rtf,.pdf" onChange={handleFileUpload} className="sr-only" />
               </label>
             </div>
           </div>
 
-          <form onSubmit={handleRunQuoteParser} className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-medium text-stone-700 mb-1.5">
-                  Vendor Name
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g., Lumiere Botanicals"
-                  value={vendorName}
-                  onChange={(e) => setVendorName(e.target.value)}
-                  className="w-full px-3.5 py-2 text-xs border border-stone-300 rounded-xl"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-stone-700 mb-1.5">
-                  Category
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g., Catering, Floral, Photography"
-                  value={serviceType}
-                  onChange={(e) => setServiceType(e.target.value)}
-                  className="w-full px-3.5 py-2 text-xs border border-stone-300 rounded-xl"
-                />
-              </div>
+          <form onSubmit={handleRunQuoteParser} className="mt-5 space-y-4" aria-busy={isParsing}>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Field label="Vendor name">
+                <input type="text" maxLength={120} placeholder="e.g. Lumiere Botanicals" value={vendorName} onChange={(e) => setVendorName(e.target.value)} className={inputCls} />
+              </Field>
+              <Field label="Category">
+                <input type="text" maxLength={80} placeholder="e.g. Catering, Floral, Photography" value={serviceType} onChange={(e) => setServiceType(e.target.value)} className={inputCls} />
+              </Field>
             </div>
-
-            <div>
-              <label className="block text-xs font-medium text-stone-700 mb-1.5">
-                Quote or Contract Text
-              </label>
+            <Field label="Quote or contract text" hint="PDFs can't be read in the browser. Copy the text from the document and paste it here.">
               <textarea
-                rows={4}
-                placeholder="Paste the vendor's email, pricing breakdown, or contract terms here (or click 'Try with Sample Quote' above)..."
+                rows={5}
+                maxLength={20000}
+                placeholder="Paste the vendor's email, pricing breakdown or contract terms…"
                 value={rawQuoteText}
                 onChange={(e) => setRawQuoteText(e.target.value)}
-                className="w-full px-3.5 py-2.5 text-xs font-mono border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600"
+                className={cx(inputCls, 'h-auto py-2.5 font-mono text-xs leading-5')}
               />
-            </div>
-
-            <div className="flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => setShowAnalyzerDrawer(false)}
-                className="px-4 py-2 text-xs font-medium text-stone-600 bg-stone-100 hover:bg-stone-200 rounded-xl"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={isParsing || !rawQuoteText.trim()}
-                className="inline-flex items-center gap-2 px-5 py-2 text-xs font-semibold text-white bg-stone-900 hover:bg-stone-800 disabled:opacity-50 rounded-xl transition-colors whitespace-nowrap"
-              >
+            </Field>
+            <div className="flex justify-end gap-2">
+              <Button onClick={() => setShowAnalyzerDrawer(false)}>Cancel</Button>
+              <Button type="submit" variant="primary" disabled={isParsing || !rawQuoteText.trim()}>
                 {isParsing ? (
                   <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    Scanning for Hidden Fees...
+                    <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin motion-reduce:animate-none" /> Scanning for hidden fees…
                   </>
                 ) : (
                   <>
-                    <Scale className="w-3.5 h-3.5" />
-                    Extract Price &amp; Compare
+                    <Scale aria-hidden="true" className="h-4 w-4" /> Extract price & compare
                   </>
                 )}
-              </button>
+              </Button>
             </div>
           </form>
-        </div>
+        </Card>
       )}
 
-      {/* Clean Side-by-Side Vendor Cards */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">
-        {vendors.map((vendor) => {
-          const terms = vendor.parsed_terms;
-          const hiddenMarkupDelta =
-            Math.round((terms.total_true_cost - terms.base_fee) * 100) / 100;
-
-          return (
-            <div
-              key={vendor.id}
-              className="bg-white border border-stone-200/90 rounded-2xl p-6 flex flex-col justify-between space-y-6 shadow-2xs"
-            >
-              <div className="space-y-5">
-                {/* Vendor Header */}
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-xs text-stone-500">{vendor.service_type}</div>
-                    <h3 className="text-base font-bold text-stone-900 mt-0.5">
-                      {vendor.name}
-                    </h3>
-                  </div>
-                  <select
-                    aria-label={`Booking status for ${vendor.name}`}
-                    value={vendor.status}
-                    onChange={(e) =>
-                      onUpdateVendorStatus(vendor.id, e.target.value as VendorStatus)
-                    }
-                    className="px-3 py-1.5 text-xs font-medium border border-stone-200 rounded-xl bg-stone-50 text-stone-800 capitalize shrink-0"
-                  >
-                    <option value="shortlisted">Shortlisted</option>
-                    <option value="quoted">Quoted</option>
-                    <option value="negotiating">Negotiating</option>
-                    <option value="booked">Booked</option>
-                    <option value="declined">Declined</option>
-                  </select>
-                </div>
-
-                {/* Quoted vs True Price Box */}
-                <div className="p-4 bg-stone-50 rounded-xl border border-stone-200/80 space-y-2.5">
-                  <div className="flex items-baseline justify-between text-xs text-stone-600">
-                    <span>Advertised Base Price</span>
-                    <span className="font-mono tabular-nums">
-                      ${terms.base_fee.toLocaleString('en-US', { maximumFractionDigits: 0 })}
-                    </span>
-                  </div>
-                  <div className="flex items-baseline justify-between text-xs text-amber-800">
-                    <span>Service Fee, Gratuity &amp; Tax</span>
-                    <span className="font-mono tabular-nums font-medium">
-                      +${hiddenMarkupDelta.toLocaleString('en-US', { maximumFractionDigits: 0 })} (
-                      {terms.service_charge_pct + terms.gratuity_pct + terms.tax_pct}%)
-                    </span>
-                  </div>
-                  <div className="pt-2.5 border-t border-stone-200 flex items-baseline justify-between">
-                    <span className="text-xs font-semibold text-stone-900">
-                      True All-In Price
-                    </span>
-                    <span className="text-xl font-bold font-mono tabular-nums text-stone-900">
-                      ${terms.total_true_cost.toLocaleString('en-US', { maximumFractionDigits: 0 })}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Hidden Fees List */}
-                {terms.hidden_fees_detected.length > 0 && (
-                  <div className="space-y-1.5">
-                    <p className="text-xs font-semibold text-amber-900 flex items-center gap-1.5">
-                      <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                      Extra Fees Found in Fine Print
-                    </p>
-                    <ul className="space-y-1 text-xs text-stone-600">
-                      {terms.hidden_fees_detected.map((fee, idx) => (
-                        <li key={idx}>· {fee}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-
-                {/* Contract Watchouts */}
-                {terms.risk_clauses.length > 0 && (
-                  <div className="space-y-2">
-                    <p className="text-xs font-semibold text-stone-800 flex items-center gap-1.5">
-                      <ShieldAlert className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-                      Contract Watchouts
-                    </p>
-                    <div className="space-y-2">
-                      {terms.risk_clauses.map((rc, idx) => (
-                        <div
-                          key={idx}
-                          className="p-3 rounded-xl bg-stone-50 border border-stone-200/80 text-xs space-y-1"
-                        >
-                          <div className="font-medium text-stone-900">{rc.clause}</div>
-                          <p className="text-stone-500">Tip: {rc.recommendation}</p>
-                        </div>
-                      ))}
+      {vendors.length === 0 ? (
+        <EmptyState
+          icon={<Scale className="h-5 w-5" />}
+          title="No vendor quotes yet"
+          body="Paste a quote and we'll show the true all-in price, hidden fees and risky clauses."
+          action={<Button variant="primary" onClick={() => setShowAnalyzerDrawer(true)}>Analyze a quote</Button>}
+        />
+      ) : (
+        <ul className="grid grid-cols-1 items-stretch gap-6 md:grid-cols-[repeat(auto-fit,minmax(300px,1fr))]">
+          {vendors.map((vendor) => {
+            const terms = vendor.parsed_terms;
+            const delta = Math.round((terms.total_true_cost - terms.base_fee) * 100) / 100;
+            const pct = terms.service_charge_pct + terms.gratuity_pct + terms.tax_pct;
+            return (
+              <li key={vendor.id} className="flex">
+                <Card as="article" interactive className="flex w-full flex-col justify-between gap-6 p-6">
+                  <div className="space-y-5">
+                    <div className="space-y-3">
+                      <div className="min-w-0">
+                        <p className="text-xs font-medium uppercase tracking-[0.08em] text-stone-600">{vendor.service_type}</p>
+                        <h3 className="mt-0.5 text-base font-semibold leading-6 tracking-[-0.01em] text-stone-900">{vendor.name}</h3>
+                      </div>
+                      <select
+                        aria-label={`Booking status for ${vendor.name}`}
+                        value={vendor.status}
+                        onChange={(e) => onUpdateVendorStatus(vendor.id, e.target.value as VendorStatus)}
+                        className={cx(inputCls, '!h-9 !w-full capitalize')}
+                      >
+                        <option value="shortlisted">Shortlisted</option>
+                        <option value="quoted">Quoted</option>
+                        <option value="negotiating">Negotiating</option>
+                        <option value="booked">Booked</option>
+                        <option value="declined">Declined</option>
+                      </select>
                     </div>
-                  </div>
-                )}
-              </div>
 
-              {/* Payment & Cancellation Footer */}
-              <div className="pt-4 border-t border-stone-100 space-y-1.5 text-xs text-stone-500">
-                <div>
-                  <span className="font-medium text-stone-700">Payments: </span>
-                  {terms.payment_schedule.join(' · ')}
-                </div>
-                <div>
-                  <span className="font-medium text-stone-700">Cancellation: </span>
-                  {terms.cancellation_policy}
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+                    <dl className="space-y-2.5 rounded-xl border border-stone-200 bg-stone-50 p-4">
+                      <div className="flex items-baseline justify-between text-sm text-stone-600">
+                        <dt>Advertised base price</dt>
+                        <dd className="font-mono tabular-nums">{money(terms.base_fee)}</dd>
+                      </div>
+                      <div className="flex items-baseline justify-between text-sm text-amber-800 dark:text-amber-300">
+                        <dt>Service fee, gratuity & tax</dt>
+                        <dd className="font-mono font-medium tabular-nums">
+                          +{money(delta)} ({pct}%)
+                        </dd>
+                      </div>
+                      <div className="flex items-baseline justify-between border-t border-stone-200 pt-2.5">
+                        <dt className="text-sm font-semibold text-stone-900">True all-in price</dt>
+                        <dd className="font-mono text-xl font-semibold tabular-nums text-stone-900">{money(terms.total_true_cost)}</dd>
+                      </div>
+                    </dl>
+
+                    {terms.hidden_fees_detected.length > 0 && (
+                      <div className="space-y-1.5">
+                        <p className="flex items-center gap-2 text-sm font-semibold text-amber-900 dark:text-amber-300">
+                          <AlertTriangle aria-hidden="true" className="h-4 w-4 shrink-0" />
+                          Extra fees in the fine print
+                        </p>
+                        <ul className="list-disc space-y-1 pl-5 text-sm leading-5 text-stone-600">
+                          {terms.hidden_fees_detected.map((fee, idx) => (
+                            <li key={idx}>{fee}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {terms.risk_clauses.length > 0 && (
+                      <div className="space-y-2">
+                        <p className="flex items-center gap-2 text-sm font-semibold text-stone-900">
+                          <ShieldAlert aria-hidden="true" className="h-4 w-4 shrink-0 text-rose-700 dark:text-rose-300" />
+                          Contract watch-outs
+                        </p>
+                        <ul className="space-y-2">
+                          {terms.risk_clauses.map((rc, idx) => (
+                            <li key={idx} className="space-y-1 rounded-xl border border-stone-200 bg-stone-50 p-3 text-sm leading-5">
+                              <p className="font-medium text-stone-900">{rc.clause}</p>
+                              <p className="text-stone-600">Tip: {rc.recommendation}</p>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+
+                  <dl className="space-y-1.5 border-t border-stone-100 pt-4 text-sm leading-5 text-stone-600">
+                    <div>
+                      <dt className="inline font-medium text-stone-800">Payments: </dt>
+                      <dd className="inline">{terms.payment_schedule.join(' · ')}</dd>
+                    </div>
+                    <div>
+                      <dt className="inline font-medium text-stone-800">Cancellation: </dt>
+                      <dd className="inline">{terms.cancellation_policy}</dd>
+                    </div>
+                  </dl>
+                </Card>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 };

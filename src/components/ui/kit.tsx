@@ -210,3 +210,66 @@ export function ErrorState({
     </div>
   );
 }
+
+/* ------------------------------------------------------- Page-level chrome */
+
+/** Header card shared by every workspace tab: eyebrow, h2, description, optional stat + actions. */
+export function PageHeader({
+  icon,
+  eyebrow,
+  title,
+  description,
+  stat,
+  actions,
+  children,
+}: {
+  icon?: React.ReactNode;
+  eyebrow: string;
+  title: string;
+  description?: React.ReactNode;
+  stat?: { value: React.ReactNode; label: string };
+  actions?: React.ReactNode;
+  children?: React.ReactNode;
+}) {
+  return (
+    <Card aria-labelledby="page-title" className="p-6 lg:p-8">
+      <div className="flex flex-wrap items-start justify-between gap-6">
+        <div className="min-w-0 max-w-2xl space-y-2">
+          <p className="inline-flex items-center gap-2 text-xs font-medium uppercase tracking-[0.08em] text-stone-600 leading-4">
+            {icon && <span aria-hidden="true">{icon}</span>}
+            {eyebrow}
+          </p>
+          <h2 id="page-title" className="text-2xl leading-8 sm:text-[28px] sm:leading-9 text-stone-900 text-balance">
+            {title}
+          </h2>
+          {description && <p className="text-sm leading-5 text-stone-600">{description}</p>}
+        </div>
+        {stat && (
+          <div className="text-right">
+            <p className="font-mono text-2xl leading-8 font-semibold tabular-nums text-stone-900">{stat.value}</p>
+            <p className="text-sm leading-5 text-stone-600">{stat.label}</p>
+          </div>
+        )}
+        {actions && <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">{actions}</div>}
+      </div>
+      {children && <div className="mt-6">{children}</div>}
+    </Card>
+  );
+}
+
+export const inputCls = cx(
+  'h-10 w-full rounded-lg border border-stone-300 bg-white px-3 text-sm text-stone-900 placeholder:text-stone-500',
+  'transition-[border-color,box-shadow] duration-150 hover:border-stone-400 motion-reduce:transition-none',
+  'focus-visible:border-[#4A6B53] focus-visible:ring-2 focus-visible:ring-[#4A6B53]/30 outline-none',
+  'disabled:opacity-50 disabled:cursor-not-allowed'
+);
+
+export function Field({ label, hint, children, className }: { label: string; hint?: string; children: React.ReactNode; className?: string }) {
+  return (
+    <label className={cx('block space-y-1.5', className)}>
+      <span className="block text-sm font-medium leading-5 text-stone-800">{label}</span>
+      {children}
+      {hint && <span className="block text-xs leading-4 text-stone-600">{hint}</span>}
+    </label>
+  );
+}

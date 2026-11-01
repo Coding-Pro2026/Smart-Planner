@@ -1,7 +1,8 @@
 import { useMemo } from 'react';
-import { AlertCircle, CheckCircle2, Circle, Clock, ExternalLink } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Circle, Clock, ClipboardCheck, ExternalLink } from 'lucide-react';
 import type { EventRecord, VendorRecord } from '../types/domain';
 import { buildVendorChecklist } from '../lib/vendorChecklist';
+import { Badge, Card, EmptyState, PageHeader, ProgressBar, cx, focusRing } from './ui/kit';
 
 export function VendorChecklistView({
   event,
@@ -25,102 +26,81 @@ export function VendorChecklistView({
     [event, vendors, manualDone, today]
   );
   const booked = rows.filter((r) => r.state === 'booked').length;
-  const pct = rows.length ? Math.round((booked / rows.length) * 100) : 0;
+  const pct = rows.length ? (booked / rows.length) * 100 : 0;
+  const money = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`;
 
   return (
     <section className="space-y-6" aria-label="Vendor checklist">
-      <div className="bg-white border border-stone-200/80 rounded-3xl p-7 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <span className="text-xs font-bold text-[#8C6226]">Vendor Checklist</span>
-            <h2 className="text-xl font-bold text-stone-900 mt-1">
-              Who to book for your {event.event_type}, and when
-            </h2>
-            <p className="text-xs text-stone-500 mt-1 max-w-xl">
-              Recommended booking windows are counted back from {event.date}. Vendors you analyse in the
-              Vendors tab are linked automatically; tick items yourself for anything booked offline.
-            </p>
-          </div>
-          <div className="text-right">
-            <div className="text-2xl font-bold font-mono tabular-nums text-stone-900">
-              {booked}/{rows.length}
-            </div>
-            <div className="text-[11px] text-stone-500">categories booked</div>
-          </div>
-        </div>
-        <div className="mt-4 h-2 bg-stone-100 rounded-full overflow-hidden" aria-hidden="true">
-          <div
-            className="h-full rounded-full bg-gradient-to-r from-[#B88B4A] to-[#4A6B53] transition-all duration-500"
-            style={{ width: `${pct}%` }}
-          />
-        </div>
-      </div>
+      <PageHeader
+        icon={<ClipboardCheck className="h-4 w-4" />}
+        eyebrow="Vendor checklist"
+        title={`Who to book for your ${event.event_type}, and when`}
+        description={`Booking windows are counted back from ${event.date}. Vendors you analyse in the Vendors tab link automatically; tick anything you booked offline.`}
+        stat={{ value: `${booked}/${rows.length}`, label: 'categories booked' }}
+      >
+        <ProgressBar value={pct} label="Categories booked" />
+      </PageHeader>
 
-      <ul className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {rows.map((r) => {
-          const suggested = Math.round((targetBudget * r.budgetSharePct) / 100);
-          const Icon = r.state === 'booked' ? CheckCircle2 : r.state === 'in_progress' ? Clock : Circle;
-          const iconCls =
-            r.state === 'booked' ? 'text-emerald-600' : r.state === 'in_progress' ? 'text-amber-600' : 'text-stone-300';
-          return (
-            <li
-              key={r.key}
-              className="bg-white border border-stone-200/80 rounded-2xl p-5 flex items-start gap-4 shadow-xs"
-            >
-              <button
-                type="button"
-                role="checkbox"
-                aria-checked={r.state === 'booked'}
-                aria-label={`Mark ${r.label} as ${r.state === 'booked' ? 'not booked' : 'booked'}`}
-                onClick={() => onToggle(r.key, r.state !== 'booked')}
-                className="mt-0.5 shrink-0 rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600"
-              >
-                <Icon className={`w-6 h-6 ${iconCls}`} />
-              </button>
-              <div className="min-w-0 flex-1 space-y-1.5">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h3 className={`text-sm font-bold ${r.state === 'booked' ? 'text-stone-400 line-through' : 'text-stone-900'}`}>
-                    {r.label}
-                  </h3>
-                  {r.essential && (
-                    <span className="px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#8C6226] bg-amber-50 rounded-md">
-                      Essential
-                    </span>
-                  )}
-                  {r.overdue && (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-rose-700 bg-rose-50 rounded-md">
-                      <AlertCircle className="w-3 h-3" /> Book now
-                    </span>
-                  )}
-                </div>
-                <p className="text-[11px] text-stone-500">
-                  Book by <span className="font-mono text-stone-700">{r.bookByDate}</span> ·{' '}
-                  {r.leadWeeks} wks ahead
-                  {r.budgetSharePct > 0 && (
-                    <>
-                      {' '}· typical share {r.budgetSharePct}% (~
-                      <span className="font-mono">${suggested.toLocaleString()}</span>)
-                    </>
-                  )}
-                </p>
-                {r.matchedVendor ? (
-                  <p className="text-[11px] text-emerald-700">
-                    Linked: <strong>{r.matchedVendor.name}</strong> — {r.matchedVendor.status}
-                  </p>
-                ) : (
+      {rows.length === 0 ? (
+        <EmptyState icon={<ClipboardCheck className="h-5 w-5" />} title="No categories for this event type" body="Open the Vendors tab to add vendors manually." />
+      ) : (
+        <ul className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {rows.map((r) => {
+            const suggested = (targetBudget * r.budgetSharePct) / 100;
+            const isBooked = r.state === 'booked';
+            const Icon = isBooked ? CheckCircle2 : r.state === 'in_progress' ? Clock : Circle;
+            const iconCls = isBooked ? 'text-[#3B5943] dark:text-emerald-300' : r.state === 'in_progress' ? 'text-amber-700 dark:text-amber-300' : 'text-stone-500';
+            return (
+              <li key={r.key}>
+                <Card as="div" interactive className="flex items-start gap-3 p-5">
                   <button
                     type="button"
-                    onClick={onOpenVendors}
-                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#4A6B53] hover:underline"
+                    role="checkbox"
+                    aria-checked={isBooked}
+                    aria-label={`${r.label}: ${isBooked ? 'booked' : 'not booked'}`}
+                    onClick={() => onToggle(r.key, !isBooked)}
+                    className={cx('-m-1.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-transform active:scale-90 motion-reduce:transition-none', focusRing)}
                   >
-                    Compare quotes <ExternalLink className="w-3 h-3" />
+                    <Icon aria-hidden="true" className={cx('h-6 w-6', iconCls)} />
                   </button>
-                )}
-              </div>
-            </li>
-          );
-        })}
-      </ul>
+                  <div className="min-w-0 flex-1 space-y-1.5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className={cx('text-sm font-semibold leading-5', isBooked ? 'text-stone-500 line-through' : 'text-stone-900')}>{r.label}</h3>
+                      {r.essential && <Badge tone="warn">Essential</Badge>}
+                      {r.overdue && (
+                        <Badge tone="bad">
+                          <AlertCircle aria-hidden="true" className="h-3 w-3" /> Book now
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="text-sm leading-5 text-stone-600">
+                      Book by <span className="font-mono tabular-nums text-stone-800">{r.bookByDate}</span> · {r.leadWeeks} wks ahead
+                      {r.budgetSharePct > 0 && (
+                        <>
+                          {' '}· typical {r.budgetSharePct}% (~<span className="font-mono tabular-nums">{money(suggested)}</span>)
+                        </>
+                      )}
+                    </p>
+                    {r.matchedVendor ? (
+                      <p className="text-sm leading-5 text-[#2F4A38] dark:text-emerald-300">
+                        Linked: <strong className="font-medium">{r.matchedVendor.name}</strong> · {r.matchedVendor.status}
+                      </p>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={onOpenVendors}
+                        className={cx('inline-flex items-center gap-1 rounded text-sm font-medium text-[#3B5943] dark:text-emerald-300 hover:underline', focusRing)}
+                      >
+                        Compare quotes <ExternalLink aria-hidden="true" className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </Card>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </section>
   );
 }
