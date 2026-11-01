@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { useDialogFocus } from './ui/kit';
 import {
   CheckCircle2,
   Cpu,
@@ -60,27 +61,32 @@ export const SecurityAuditModal: React.FC<SecurityAuditModalProps> = ({
     }
   }, [isOpen]);
 
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(isOpen, dialogRef, onClose);
+
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-white border border-slate-200 rounded-xl max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden shadow-xl">
+    <div className="fixed inset-0 z-50 bg-stone-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="security-audit-title" className="outline-none bg-white border border-stone-200 rounded-xl max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden shadow-xl">
         {/* Modal Header */}
-        <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+        <div className="px-6 py-4 border-b border-stone-200 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <ShieldCheck className="w-5 h-5 text-emerald-600" />
             <div>
-              <h2 className="text-base font-bold text-slate-900">
+              <h2 id="security-audit-title" className="text-base font-semibold text-stone-900">
                 Post-Production Security Audit, Unit Verification & Model Routing Vault
               </h2>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-stone-600">
                 Live execution of deterministic math assertions, DAG cycle protection, AES-256-GCM envelope vault, and RLS checks
               </p>
             </div>
           </div>
           <button
+            type="button"
+            aria-label="Close security audit"
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-700 rounded-md"
+            className="p-1.5 text-stone-600 hover:text-stone-700 rounded-md"
           >
             <X className="w-5 h-5" />
           </button>
@@ -88,15 +94,15 @@ export const SecurityAuditModal: React.FC<SecurityAuditModalProps> = ({
 
         <div className="p-6 overflow-y-auto space-y-6">
           {/* Part 1: Bring-your-own-key AI status + envelope vault info */}
-          <div className="p-5 bg-slate-50 border border-slate-200 rounded-lg space-y-3">
+          <div className="p-5 bg-stone-50 border border-stone-200 rounded-lg space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
-                  <Cpu className="w-4 h-4 text-indigo-600" />
+                <h3 className="text-sm font-semibold text-stone-900 flex items-center gap-2">
+                  <Cpu className="w-4 h-4 text-[#3B5943] dark:text-emerald-300" />
                   AI Provider (Bring Your Own Key)
                 </h3>
-                <p className="text-xs text-slate-500">
-                  Currently using: <strong className="text-slate-800">{aiStatusLabel}</strong>. Keys stay in your browser and are never stored or logged by the server.
+                <p className="text-xs text-stone-600">
+                  Currently using: <strong className="text-stone-800">{aiStatusLabel}</strong>. Keys stay in your browser and are never stored or logged by the server.
                 </p>
               </div>
               <button
@@ -105,13 +111,13 @@ export const SecurityAuditModal: React.FC<SecurityAuditModalProps> = ({
                   onClose();
                   onOpenAiSettings();
                 }}
-                className="px-3 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-md"
+                className="h-9 px-4 text-sm font-medium inline-flex items-center justify-center text-white bg-[#3B5943] hover:bg-[#314a38] rounded-md"
               >
                 Configure AI
               </button>
             </div>
             {vaultStatus && (
-              <div className="text-[11px] font-mono text-slate-500 flex flex-wrap items-center gap-2 pt-2 border-t border-slate-200">
+              <div className="text-xs font-mono text-stone-600 flex flex-wrap items-center gap-2 pt-2 border-t border-stone-200">
                 <Lock className="w-3.5 h-3.5 text-emerald-700" />
                 <span>{vaultStatus.cipherSuite}</span>
               </div>
@@ -123,17 +129,17 @@ export const SecurityAuditModal: React.FC<SecurityAuditModalProps> = ({
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="text-sm font-semibold text-slate-900">
+                <h3 className="text-sm font-semibold text-stone-900">
                   Automated Unit, Integration & Security Verification Suite
                 </h3>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-stone-600">
                   Verifies budget edge cases, OLS linear regression, CPM cycle detection, AES-256-GCM roundtrips, SSRF/Prompt Injection guards, and Tenant RLS
                 </p>
               </div>
               <button
                 onClick={fetchAuditAndVault}
                 disabled={isRunningAudit}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-md transition-colors whitespace-nowrap"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-stone-700 bg-stone-100 hover:bg-stone-200 rounded-md transition-colors whitespace-nowrap"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isRunningAudit ? 'animate-spin' : ''}`} />
                 Re-Run All 9 Assertions
@@ -141,20 +147,20 @@ export const SecurityAuditModal: React.FC<SecurityAuditModalProps> = ({
             </div>
 
             {report && (
-              <div className="border border-slate-200 rounded-lg divide-y divide-slate-200">
+              <div className="border border-stone-200 rounded-lg divide-y divide-stone-200">
                 {report.checks.map((chk) => (
                   <div
                     key={chk.id}
-                    className="p-3.5 flex items-start justify-between gap-4 hover:bg-slate-50 transition-colors"
+                    className="p-3.5 flex items-start justify-between gap-4 hover:bg-stone-50 transition-colors"
                   >
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
                         <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                        <span className="text-xs font-semibold text-slate-900">{chk.title}</span>
+                        <span className="text-xs font-semibold text-stone-900">{chk.title}</span>
                       </div>
-                      <p className="text-xs text-slate-600 pl-6">{chk.assertionDetails}</p>
+                      <p className="text-xs text-stone-600 pl-6">{chk.assertionDetails}</p>
                     </div>
-                    <div className="text-right font-mono text-[11px] text-slate-500 shrink-0">
+                    <div className="text-right font-mono text-xs text-stone-600 shrink-0">
                       <div className="text-emerald-700 font-semibold">
                         {chk.passed ? 'PASSED' : 'FAILED'}
                       </div>
@@ -168,7 +174,7 @@ export const SecurityAuditModal: React.FC<SecurityAuditModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-3.5 border-t border-slate-200 bg-slate-50 flex items-center justify-between text-xs text-slate-600">
+        <div className="px-6 py-3.5 border-t border-stone-200 bg-stone-50 flex items-center justify-between text-xs text-stone-600">
           <span>
             Status:{' '}
             <strong className="text-emerald-700 font-mono">
@@ -177,7 +183,7 @@ export const SecurityAuditModal: React.FC<SecurityAuditModalProps> = ({
           </span>
           <button
             onClick={onClose}
-            className="px-4 py-1.5 text-xs font-medium text-white bg-slate-900 hover:bg-slate-800 rounded-md"
+            className="px-4 py-1.5 text-xs font-medium text-white bg-[#3B5943] hover:bg-[#314a38] rounded-md"
           >
             Close Verification Report
           </button>

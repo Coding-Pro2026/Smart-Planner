@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Button, EmptyState, Modal, PageHeader } from './ui/kit';
 import {
   ArrowDown,
   ArrowUp,
@@ -130,6 +131,12 @@ export const CustomCategoriesAndHotelsView: React.FC<
   const [maxNightlyBudget, setMaxNightlyBudget] = useState<string>('180');
   const [hotelNotice, setHotelNotice] = useState<string | null>(null);
   const [isSearchingHotels, setIsSearchingHotels] = useState<boolean>(false);
+  // AI generation replaces every custom tab and room block, so it needs an explicit confirmation.
+  type GenOverride = { eventType: string; location: string; eventDays: number; isDestination: boolean; customPrompt: string };
+  const [pendingGenerate, setPendingGenerate] = useState<{ override?: GenOverride } | null>(null);
+  // Remember what was already pushed to the core budget/schedule so a double-click can't duplicate it.
+  const [synced, setSynced] = useState<ReadonlySet<string>>(() => new Set());
+  const markSynced = (key: string) => setSynced((prev) => new Set(prev).add(key));
 
   // Sync local inputs when event switches
   useEffect(() => {
@@ -219,7 +226,8 @@ export const CustomCategoriesAndHotelsView: React.FC<
       setHotelNotice(res.data.notice ?? null);
       if (Array.isArray(res.data.groundingSources)) setGroundingSources(res.data.groundingSources);
     }
-    // On failure keep existing deals (offline-friendly)
+    // On failure keep existing deals (offline-friendly) but tell the user instead of failing silently
+    if (!res.ok) setHotelNotice(`Couldn't refresh nearby hotels (${res.error}). Showing your last results.`);
     setIsSearchingHotels(false);
   };
 
@@ -324,6 +332,11 @@ export const CustomCategoriesAndHotelsView: React.FC<
     void fetchLiveNearbyHotels(targetLoc);
   };
 
+  const requestGenerate = (override?: GenOverride) => {
+    if (customModules.length > 0 || hotelBlocks.length > 0) setPendingGenerate({ override });
+    else void triggerAiGenerate(override);
+  };
+
   const applyPresetScenario = (preset: 'india_5d' | 'usa_2d' | 'funeral') => {
     if (preset === 'india_5d') {
       setEventTypeInput('wedding');
@@ -333,7 +346,7 @@ export const CustomCategoriesAndHotelsView: React.FC<
       setCustomAiPrompt(
         '5-day Indian destination wedding with Haldi, Mehendi, Sangeet performances, Baraat, Mandap Pheras, and palace hotel blocks'
       );
-      triggerAiGenerate({
+      requestGenerate({
         eventType: 'wedding',
         location: 'Udaipur, Rajasthan, India — Taj Lake Palace',
         eventDays: 5,
@@ -349,7 +362,7 @@ export const CustomCategoriesAndHotelsView: React.FC<
       setCustomAiPrompt(
         '2-day USA vineyard wedding with rehearsal dinner, ceremony processional, reception toast order, and resort room blocks'
       );
-      triggerAiGenerate({
+      requestGenerate({
         eventType: 'wedding',
         location: 'Napa Valley, CA, USA — Cortona Vineyard',
         eventDays: 2,
@@ -365,7 +378,7 @@ export const CustomCategoriesAndHotelsView: React.FC<
       setCustomAiPrompt(
         'Funeral & Celebration of Life service with eulogy speaking order (who speaks first), pallbearers, floral tributes, and bereavement repast'
       );
-      triggerAiGenerate({
+      requestGenerate({
         eventType: 'funeral',
         location: 'Boston, MA — Grace Memorial Chapel',
         eventDays: 1,
@@ -438,6 +451,7 @@ export const CustomCategoriesAndHotelsView: React.FC<
       }
     }
 
+    markSynced(`mod:${mod.id}`);
     setSyncedFeedback(
       `Added ${addedBudget} custom budget line item(s) and ${addedTasks} milestone task(s) from "${mod.category_title}" into your core Budget and Schedule.`
     );
@@ -457,6 +471,7 @@ export const CustomCategoriesAndHotelsView: React.FC<
       is_per_guest: false,
       status: 'contracted',
     });
+    markSynced(`block:${block.id}`);
     setSyncedFeedback(
       `Synced "${block.hotel_name}" room block ($${(
         block.nightly_rate * totalRoomNights
@@ -481,15 +496,17 @@ export const CustomCategoriesAndHotelsView: React.FC<
   const handleCreateHotelBlockSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!hotelName.trim()) return;
+    const blocked = Math.min(500, Math.max(1, Math.round(Number(roomsBlocked)) || 10));
     onAddHotelBlock({
       hotel_name: hotelName.trim(),
       room_type: roomType.trim() || 'Standard Group Block',
       check_in_date: event.date,
       check_out_date: event.date,
-      nights: Math.max(1, Number(nights) || 1),
-      rooms_blocked: Math.max(1, Number(roomsBlocked) || 10),
-      rooms_booked: Math.max(0, Number(roomsBooked) || 0),
-      nightly_rate: Math.max(0, Number(nightlyRate) || 180),
+      nights: Math.min(14, Math.max(1, Math.round(Number(nights)) || 1)),
+      rooms_blocked: blocked,
+      // pickup can never exceed the block size
+      rooms_booked: Math.min(blocked, Math.max(0, Math.round(Number(roomsBooked)) || 0)),
+      nightly_rate: Number.isFinite(Number(nightlyRate)) && nightlyRate.trim() !== '' ? Math.max(0, Number(nightlyRate)) : 180,
       group_code: groupCode.trim() || 'GROUP-BLOCK',
       shuttle_included: shuttleIncluded,
       assigned_guests_notes:
@@ -517,14 +534,23 @@ export const CustomCategoriesAndHotelsView: React.FC<
   );
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
+      <PageHeader
+        icon={<Hotel className="h-4 w-4" />}
+        eyebrow={`Tailored for ${event.event_type}`}
+        title="Custom plans & hotels"
+        description="Run-of-show, rituals and speaking order for this event, plus nearby hotels and guest room blocks."
+        stat={hotelBlocks.length ? { value: `${totalRoomsBooked}/${totalRoomsBlocked}`, label: 'rooms booked' } : undefined}
+      />
+
       {/* Sub-navigation bar for all dynamic custom categories of this event */}
-      <div className="bg-white border border-stone-200/80 rounded-3xl p-5 sm:p-6 shadow-sm flex flex-wrap items-center justify-between gap-4">
+      <div className="bg-white border border-stone-200 rounded-2xl p-5 sm:p-6 shadow-sm flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
+            aria-pressed={!focusedModuleId}
             onClick={() => onSelectFocusedModule && onSelectFocusedModule(null)}
-            className={`px-3.5 py-2 text-xs font-semibold rounded-2xl transition-colors ${
+            className={`h-9 px-4 text-sm font-medium inline-flex items-center justify-center rounded-lg transition-colors motion-reduce:transition-none ${
               !focusedModuleId
                 ? 'bg-stone-900 text-white'
                 : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
@@ -536,13 +562,14 @@ export const CustomCategoriesAndHotelsView: React.FC<
             <button
               key={mod.id}
               type="button"
+              aria-pressed={focusedModuleId === mod.id}
               onClick={() =>
                 onSelectFocusedModule && onSelectFocusedModule(mod.id)
               }
-              className={`px-3.5 py-2 text-xs font-semibold rounded-2xl transition-colors ${
+              className={`h-9 px-4 text-sm font-medium inline-flex items-center justify-center rounded-lg transition-colors motion-reduce:transition-none ${
                 focusedModuleId === mod.id
-                  ? 'bg-indigo-600 text-white'
-                  : 'bg-indigo-50/80 text-indigo-700 hover:bg-indigo-100'
+                  ? 'bg-[#3B5943] text-white'
+                  : 'bg-[#EEF4EF] text-[#3B5943] dark:text-emerald-300 hover:bg-[#DFECE2]'
               }`}
             >
               {mod.category_title}
@@ -555,7 +582,7 @@ export const CustomCategoriesAndHotelsView: React.FC<
             type="button"
             onClick={() => applyPresetScenario('funeral')}
             disabled={isGenerating}
-            className="px-3 py-1.5 text-xs font-semibold text-stone-700 bg-stone-100 hover:bg-stone-200 rounded-xl transition-colors"
+            className="h-9 px-4 text-sm font-medium inline-flex items-center justify-center text-stone-700 bg-stone-100 hover:bg-stone-200 rounded-xl transition-colors"
           >
             Switch to Funeral / Memorial
           </button>
@@ -563,7 +590,7 @@ export const CustomCategoriesAndHotelsView: React.FC<
             type="button"
             onClick={() => applyPresetScenario('india_5d')}
             disabled={isGenerating}
-            className="px-3 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-xl transition-colors"
+            className="h-9 px-4 text-sm font-medium inline-flex items-center justify-center text-[#3B5943] dark:text-emerald-300 bg-[#EEF4EF] hover:bg-[#DFECE2] rounded-xl transition-colors"
           >
             Switch to 5-Day Indian Wedding
           </button>
@@ -571,7 +598,7 @@ export const CustomCategoriesAndHotelsView: React.FC<
             type="button"
             onClick={() => applyPresetScenario('usa_2d')}
             disabled={isGenerating}
-            className="px-3 py-1.5 text-xs font-semibold text-stone-700 bg-stone-100 hover:bg-stone-200 rounded-xl transition-colors"
+            className="h-9 px-4 text-sm font-medium inline-flex items-center justify-center text-stone-700 bg-stone-100 hover:bg-stone-200 rounded-xl transition-colors"
           >
             Switch to 2-Day USA Wedding
           </button>
@@ -579,7 +606,7 @@ export const CustomCategoriesAndHotelsView: React.FC<
       </div>
 
       {syncedFeedback && (
-        <div className="p-4 rounded-2xl bg-emerald-50/80 border border-emerald-200 text-xs text-emerald-900 flex items-center justify-between gap-3">
+        <div role="status" className="p-4 rounded-2xl bg-emerald-50/80 border border-emerald-200 text-xs text-emerald-900 flex items-center justify-between gap-3">
           <span>{syncedFeedback}</span>
           <button
             type="button"
@@ -593,24 +620,24 @@ export const CustomCategoriesAndHotelsView: React.FC<
 
       {/* CHAIN-OF-THOUGHT EVENT ANALYSIS trace */}
       {cotAnalysis && (
-        <div className="bg-white border border-stone-200/80 rounded-3xl p-6 sm:p-7 shadow-sm space-y-4">
+        <div className="bg-white border border-stone-200 rounded-2xl p-6 sm:p-7 shadow-sm space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <span className="text-xs font-bold text-teal-700 uppercase tracking-wider">
+              <span className="text-xs font-semibold text-[#3B5943] dark:text-emerald-300 uppercase tracking-wider">
                 Agentic Chain-of-Thought Analysis ({event.event_type.toUpperCase()})
               </span>
-              <h3 className="text-base font-bold text-stone-900 mt-0.5">
+              <h3 className="text-base font-semibold text-stone-900 mt-0.5">
                 How PlanGenie Deduced Your Custom Sub-Categories &amp; Ritual Checklists
               </h3>
             </div>
-            <span className="font-mono text-[11px] font-semibold text-teal-700">
+            <span className="font-mono text-xs font-medium uppercase tracking-[0.08em] text-stone-600">
               4-Step Cultural &amp; Protocol Deduction
             </span>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 pt-2 border-t border-stone-100 text-xs">
+          <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-4 gap-4 pt-2 border-t border-stone-100 text-xs">
             <div className="space-y-1">
-              <div className="font-mono text-[11px] font-bold text-teal-700">
+              <div className="font-mono text-xs font-medium uppercase tracking-[0.08em] text-stone-600">
                 01 · Event Archetype &amp; Tone
               </div>
               <p className="text-stone-600 leading-relaxed">
@@ -618,7 +645,7 @@ export const CustomCategoriesAndHotelsView: React.FC<
               </p>
             </div>
             <div className="space-y-1">
-              <div className="font-mono text-[11px] font-bold text-emerald-700">
+              <div className="font-mono text-xs font-semibold text-emerald-700">
                 02 · Regional &amp; Cultural Nuances
               </div>
               <p className="text-stone-600 leading-relaxed">
@@ -626,7 +653,7 @@ export const CustomCategoriesAndHotelsView: React.FC<
               </p>
             </div>
             <div className="space-y-1">
-              <div className="font-mono text-[11px] font-bold text-amber-700">
+              <div className="font-mono text-xs font-semibold text-amber-700">
                 03 · Speaking &amp; Ritual Sequence
               </div>
               <p className="text-stone-600 leading-relaxed">
@@ -634,7 +661,7 @@ export const CustomCategoriesAndHotelsView: React.FC<
               </p>
             </div>
             <div className="space-y-1">
-              <div className="font-mono text-[11px] font-bold text-sky-700">
+              <div className="font-mono text-xs font-semibold text-sky-700">
                 04 · Sub-Category Synthesis
               </div>
               <p className="text-stone-600 leading-relaxed">
@@ -646,22 +673,22 @@ export const CustomCategoriesAndHotelsView: React.FC<
       )}
 
       {/* SECTION 1: Custom Event-Type & Regional Categories (Speaking Order / Who Speaks First / Multi-Day Rituals) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+      <div className="grid grid-cols-1 2xl:grid-cols-12 gap-6 items-stretch">
         {(visibleModules.length > 0 ? visibleModules : customModules).map(
           (mod) => {
             const completedCount = mod.items.filter((i) => i.completed).length;
             const colSpanClass =
-              visibleModules.length === 1 ? 'lg:col-span-12' : 'lg:col-span-6';
+              visibleModules.length === 1 ? '2xl:col-span-12' : '2xl:col-span-6';
 
             return (
               <div
                 key={mod.id}
-                className={`${colSpanClass} bg-white border border-stone-200/80 rounded-3xl p-7 sm:p-8 flex flex-col justify-between gap-6 shadow-sm hover:shadow-md transition-shadow duration-200`}
+                className={`${colSpanClass} bg-white border border-stone-200 rounded-2xl p-6 flex flex-col justify-between gap-6 shadow-[0_1px_2px_rgba(28,25,23,0.04)] hover:shadow-[0_4px_16px_-4px_rgba(28,25,23,0.12)] transition-shadow motion-reduce:transition-none`}
               >
                 <div className="space-y-5">
                   <div className="flex items-start justify-between gap-4">
                     <div className="space-y-1">
-                      <div className="flex items-center gap-2 text-xs font-semibold text-indigo-600">
+                      <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.08em] text-stone-600">
                         {mod.module_type === 'speaking_order' ? (
                           <Mic className="w-3.5 h-3.5" />
                         ) : (
@@ -669,19 +696,19 @@ export const CustomCategoriesAndHotelsView: React.FC<
                         )}
                         <span>{mod.location_context}</span>
                       </div>
-                      <h3 className="text-lg font-bold text-stone-900">
+                      <h3 className="text-lg font-semibold text-stone-900">
                         {mod.category_title}
                       </h3>
-                      <p className="text-xs text-stone-500 leading-relaxed">
+                      <p className="text-xs text-stone-600 leading-relaxed">
                         {mod.description}
                       </p>
                     </div>
 
                     <div className="text-right shrink-0">
-                      <span className="font-mono text-sm font-bold text-stone-900 tabular-nums">
+                      <span className="font-mono text-sm font-semibold text-stone-900 tabular-nums">
                         {completedCount}/{mod.items.length}
                       </span>
-                      <div className="text-[11px] text-stone-400">ready</div>
+                      <div className="text-xs text-stone-600">ready</div>
                     </div>
                   </div>
 
@@ -702,7 +729,7 @@ export const CustomCategoriesAndHotelsView: React.FC<
                             className={`mt-0.5 w-4 h-4 rounded-md border flex items-center justify-center shrink-0 transition-colors ${
                               item.completed
                                 ? 'bg-emerald-600 border-emerald-600 text-white'
-                                : 'border-stone-300 hover:border-indigo-600'
+                                : 'border-stone-300 hover:border-[#C9DDCF]'
                             }`}
                           >
                             {item.completed && <Check className="w-3 h-3" />}
@@ -710,13 +737,13 @@ export const CustomCategoriesAndHotelsView: React.FC<
 
                           <div className="min-w-0 space-y-1">
                             <div className="flex flex-wrap items-center gap-2">
-                              <span className="font-mono text-[11px] font-bold text-indigo-600 tabular-nums">
+                              <span className="font-mono text-xs font-semibold text-[#3B5943] dark:text-emerald-300 tabular-nums">
                                 #{idx + 1}
                               </span>
                               <span
                                 className={`font-semibold ${
                                   item.completed
-                                    ? 'line-through text-stone-400'
+                                    ? 'line-through text-stone-600'
                                     : 'text-stone-900'
                                 }`}
                               >
@@ -724,7 +751,7 @@ export const CustomCategoriesAndHotelsView: React.FC<
                               </span>
                             </div>
 
-                            <div className="flex flex-wrap items-center gap-2 text-[11px] text-stone-500">
+                            <div className="flex flex-wrap items-center gap-2 text-xs text-stone-600">
                               <span className="font-mono text-stone-700 font-medium">
                                 {item.role_or_day}
                               </span>
@@ -733,7 +760,7 @@ export const CustomCategoriesAndHotelsView: React.FC<
                             </div>
 
                             {item.notes && (
-                              <p className="text-[11px] text-stone-500 leading-relaxed">
+                              <p className="text-xs text-stone-600 leading-relaxed">
                                 {item.notes}
                               </p>
                             )}
@@ -749,7 +776,7 @@ export const CustomCategoriesAndHotelsView: React.FC<
                             }
                             disabled={idx === 0}
                             title="Move earlier in order (e.g. Speak First)"
-                            className="p-1 text-stone-400 hover:text-stone-800 disabled:opacity-25 rounded-lg"
+                            className="p-1 text-stone-600 hover:text-stone-800 disabled:opacity-25 rounded-lg"
                           >
                             <ArrowUp className="w-3.5 h-3.5" />
                           </button>
@@ -760,7 +787,7 @@ export const CustomCategoriesAndHotelsView: React.FC<
                             }
                             disabled={idx === mod.items.length - 1}
                             title="Move later in order"
-                            className="p-1 text-stone-400 hover:text-stone-800 disabled:opacity-25 rounded-lg"
+                            className="p-1 text-stone-600 hover:text-stone-800 disabled:opacity-25 rounded-lg"
                           >
                             <ArrowDown className="w-3.5 h-3.5" />
                           </button>
@@ -770,7 +797,7 @@ export const CustomCategoriesAndHotelsView: React.FC<
                               onDeleteCustomItem(mod.id, item.id)
                             }
                             title="Remove item"
-                            className="p-1 text-stone-400 hover:text-rose-600 rounded-lg"
+                            className="p-1 text-stone-600 hover:text-rose-600 rounded-lg"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -805,10 +832,11 @@ export const CustomCategoriesAndHotelsView: React.FC<
                       }));
                       setNewItemNotesMap((prev) => ({ ...prev, [mod.id]: '' }));
                     }}
-                    className="grid grid-cols-1 sm:grid-cols-12 gap-2 pt-1"
+                    className="grid grid-cols-1 2xl:grid-cols-12 gap-2 pt-1"
                   >
                     <input
                       type="text"
+                      aria-label={`Add item to ${mod.category_title}`}
                       placeholder={
                         mod.module_type === 'speaking_order'
                           ? 'Add speaker / eulogy / toast...'
@@ -821,10 +849,11 @@ export const CustomCategoriesAndHotelsView: React.FC<
                           [mod.id]: e.target.value,
                         }))
                       }
-                      className="sm:col-span-5 px-3 py-2 text-xs bg-stone-50 border border-stone-200 rounded-xl"
+                      className="2xl:col-span-5 h-10 px-3 text-sm bg-white border border-stone-300 rounded-lg"
                     />
                     <input
                       type="text"
+                      aria-label="Slot or day"
                       placeholder="Slot / Day (e.g. Speaker #1 or Day 4)"
                       value={newItemRoleMap[mod.id] ?? ''}
                       onChange={(e) =>
@@ -833,10 +862,11 @@ export const CustomCategoriesAndHotelsView: React.FC<
                           [mod.id]: e.target.value,
                         }))
                       }
-                      className="sm:col-span-3 px-3 py-2 text-xs bg-stone-50 border border-stone-200 rounded-xl"
+                      className="2xl:col-span-3 h-10 px-3 text-sm bg-white border border-stone-300 rounded-lg"
                     />
                     <input
                       type="text"
+                      aria-label="Person or lead"
                       placeholder="Person / Lead"
                       value={newItemPersonMap[mod.id] ?? ''}
                       onChange={(e) =>
@@ -845,11 +875,11 @@ export const CustomCategoriesAndHotelsView: React.FC<
                           [mod.id]: e.target.value,
                         }))
                       }
-                      className="sm:col-span-2 px-3 py-2 text-xs bg-stone-50 border border-stone-200 rounded-xl"
+                      className="2xl:col-span-2 h-10 px-3 text-sm bg-white border border-stone-300 rounded-lg"
                     />
                     <button
                       type="submit"
-                      className="sm:col-span-2 inline-flex items-center justify-center gap-1 px-3 py-2 text-xs font-semibold text-white bg-stone-900 hover:bg-stone-800 rounded-xl transition-colors"
+                      className="2xl:col-span-2 inline-flex items-center justify-center gap-1 h-9 px-4 text-sm font-medium inline-flex items-center justify-center text-white bg-[#3B5943] hover:bg-[#314a38] rounded-xl transition-colors"
                     >
                       <Plus className="w-3.5 h-3.5" />
                       Add
@@ -863,16 +893,17 @@ export const CustomCategoriesAndHotelsView: React.FC<
                   (mod.suggested_task_additions &&
                     mod.suggested_task_additions.length > 0)) && (
                   <div className="pt-4 border-t border-stone-100 flex flex-wrap items-center justify-between gap-3">
-                    <span className="text-[11px] text-stone-500">
+                    <span className="text-xs text-stone-600">
                       Includes {mod.suggested_budget_additions?.length ?? 0} budget item(s) &amp;{' '}
                       {mod.suggested_task_additions?.length ?? 0} timeline task(s)
                     </span>
                     <button
                       type="button"
+                      disabled={synced.has(`mod:${mod.id}`)}
                       onClick={() => handleSyncSuggestedToCore(mod)}
-                      className="py-2 px-3.5 text-xs font-semibold text-indigo-700 bg-indigo-50/80 hover:bg-indigo-100 rounded-xl transition-colors"
+                      className="disabled:opacity-60 disabled:pointer-events-none h-9 px-4 text-sm font-medium inline-flex items-center justify-center text-[#3B5943] dark:text-emerald-300 bg-[#EEF4EF] hover:bg-[#DFECE2] rounded-xl transition-colors"
                     >
-                      + Sync to Core Budget &amp; Schedule
+                      {synced.has(`mod:${mod.id}`) ? '✓ Synced to Budget & Schedule' : '+ Sync to Core Budget & Schedule'}
                     </button>
                   </div>
                 )}
@@ -895,17 +926,17 @@ export const CustomCategoriesAndHotelsView: React.FC<
       />
 
       {/* SECTION 2: LIVE ONLINE NEARBY CHEAP HOTEL FINDER (Google Search Grounding + OpenStreetMap Live Feed) */}
-      <div className="bg-white border border-stone-200/80 rounded-3xl p-7 sm:p-8 shadow-sm hover:shadow-md transition-shadow duration-200 space-y-6">
+      <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-[0_1px_2px_rgba(28,25,23,0.04)] hover:shadow-[0_4px_16px_-4px_rgba(28,25,23,0.12)] transition-shadow motion-reduce:transition-none space-y-6">
         <div className="flex flex-wrap items-start justify-between gap-6">
           <div className="space-y-1.5 max-w-2xl">
             <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700">
               <Globe className="w-4 h-4" />
               <span>Nearby Hotel Finder · Sorted by Lowest Nightly Price</span>
             </div>
-            <h3 className="text-xl font-bold text-stone-900">
+            <h3 className="text-xl font-semibold text-stone-900">
               Nearby Budget-Friendly Hotels Around {event.location.split('—')[0].trim()}
             </h3>
-            <p className="text-xs text-stone-500 leading-relaxed">
+            <p className="text-xs text-stone-600 leading-relaxed">
               Real hotels near the venue from OpenStreetMap (© OpenStreetMap contributors, ODbL). Rates aren’t available from open data, so use each booking link for live prices. Click{' '}
               <strong className="text-stone-800">Add as Room-Block Inquiry</strong> on any hotel to track it in your event room blocks.
             </p>
@@ -919,22 +950,22 @@ export const CustomCategoriesAndHotelsView: React.FC<
             className="flex flex-wrap items-end gap-2.5"
           >
             <div>
-              <label className="block text-[11px] font-medium text-stone-500 mb-1">
-                Max Nightly Target ($)
-              </label>
-              <input
+              <label className="block">
+<span className="block text-sm font-medium text-stone-800 mb-1.5">Max Nightly Target ($)</span>
+<input
                 type="number"
                 min={40}
                 max={1000}
                 value={maxNightlyBudget}
                 onChange={(e) => setMaxNightlyBudget(e.target.value)}
-                className="w-28 px-3 py-2 text-xs font-mono bg-stone-50 border border-stone-200 rounded-xl tabular-nums"
+                className="w-28 h-10 px-3 text-sm font-mono bg-white border border-stone-300 rounded-lg tabular-nums"
               />
+</label>
             </div>
             <button
               type="submit"
               disabled={isSearchingHotels}
-              className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 rounded-xl transition-colors"
+              className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium inline-flex items-center justify-center text-white bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 rounded-xl transition-colors"
             >
               {isSearchingHotels ? (
                 <>
@@ -951,16 +982,23 @@ export const CustomCategoriesAndHotelsView: React.FC<
           </form>
         </div>
 
-        {hotelNotice && <p className="text-xs text-stone-500">{hotelNotice}</p>}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5 pt-2">
+        {hotelNotice && <p className="text-xs text-stone-600">{hotelNotice}</p>}
+        {liveHotelDeals.length === 0 && (
+          <EmptyState
+            icon={<Globe className="h-5 w-5" />}
+            title={isSearchingHotels ? 'Searching for hotels…' : 'No nearby hotels found'}
+            body={isSearchingHotels ? 'Looking up hotels near the venue.' : 'Try a more specific venue address, then refresh.'}
+          />
+        )}
+        <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-5 pt-2" aria-busy={isSearchingHotels}>
           {liveHotelDeals.map((deal) => (
             <div
               key={deal.id}
-              className="border border-stone-200/90 rounded-2xl p-5 flex flex-col justify-between gap-4 hover:border-stone-300 transition-colors"
+              className="border border-stone-200 rounded-2xl p-5 flex flex-col justify-between gap-4 hover:border-stone-300 transition-colors"
             >
               <div className="space-y-3">
                 <div className="flex items-start justify-between gap-2">
-                  <span className="text-[11px] font-semibold text-emerald-700">
+                  <span className="text-xs font-semibold text-emerald-700">
                     {deal.tier_label}
                   </span>
                   {deal.star_rating > 0 && (
@@ -972,10 +1010,10 @@ export const CustomCategoriesAndHotelsView: React.FC<
                 </div>
 
                 <div>
-                  <h4 className="text-sm font-bold text-stone-900">
+                  <h4 className="text-sm font-semibold text-stone-900">
                     {deal.hotel_name}
                   </h4>
-                  <p className="text-xs text-stone-500 mt-0.5">
+                  <p className="text-xs text-stone-600 mt-0.5">
                     {deal.neighborhood_or_address} ·{' '}
                     <span className="font-medium text-stone-700">
                       {deal.distance_from_venue}
@@ -985,13 +1023,13 @@ export const CustomCategoriesAndHotelsView: React.FC<
 
                 {deal.price_per_night > 0 ? (
                   <div className="flex items-baseline gap-2 pt-1">
-                    <span className="text-2xl font-bold font-mono text-stone-900 tabular-nums">
+                    <span className="text-2xl font-semibold font-mono text-stone-900 tabular-nums">
                       ${deal.price_per_night}
                     </span>
-                    <span className="text-[11px] text-stone-500">/ night</span>
+                    <span className="text-xs text-stone-600">/ night</span>
                   </div>
                 ) : (
-                  <p className="text-xs text-stone-500 pt-1">
+                  <p className="text-xs text-stone-600 pt-1">
                     Nightly rate: <strong className="text-stone-700">check the booking link</strong> for live prices.
                   </p>
                 )}
@@ -1001,7 +1039,7 @@ export const CustomCategoriesAndHotelsView: React.FC<
                 <button
                   type="button"
                   onClick={() => handleLockInLiveHotelDeal(deal)}
-                  className="w-full py-2.5 px-3 text-xs font-semibold text-white bg-stone-900 hover:bg-stone-800 rounded-xl transition-colors"
+                  className="w-full h-9 px-4 text-sm font-medium inline-flex items-center justify-center text-white bg-[#3B5943] hover:bg-[#314a38] rounded-xl transition-colors"
                 >
                   + Add as Room-Block Inquiry
                 </button>
@@ -1009,7 +1047,7 @@ export const CustomCategoriesAndHotelsView: React.FC<
                   href={safeHttpUrl(deal.booking_url) ?? '#'}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="w-full py-2 px-3 text-xs font-medium text-indigo-700 hover:underline inline-flex items-center justify-center gap-1"
+                  className="w-full py-2 px-3 text-xs font-medium text-[#3B5943] dark:text-emerald-300 hover:underline inline-flex items-center justify-center gap-1"
                 >
                   Check Rates &amp; Availability <ExternalLink className="w-3 h-3" />
                 </a>
@@ -1019,7 +1057,7 @@ export const CustomCategoriesAndHotelsView: React.FC<
         </div>
 
         {groundingSources.length > 0 && (
-          <div className="pt-3 border-t border-stone-100 flex flex-wrap items-center gap-3 text-[11px] text-stone-400">
+          <div className="pt-3 border-t border-stone-100 flex flex-wrap items-center gap-3 text-xs text-stone-600">
             <span>Verified Online Sources:</span>
             {groundingSources.map((src, i) => (
               <a
@@ -1027,7 +1065,7 @@ export const CustomCategoriesAndHotelsView: React.FC<
                 href={safeHttpUrl(src.uri) ?? '#'}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-indigo-600 hover:underline inline-flex items-center gap-1"
+                className="text-[#3B5943] dark:text-emerald-300 hover:underline inline-flex items-center gap-1"
               >
                 {src.title} <ExternalLink className="w-2.5 h-2.5" />
               </a>
@@ -1037,31 +1075,31 @@ export const CustomCategoriesAndHotelsView: React.FC<
       </div>
 
       {/* SECTION 3: Contracted Hotel Room Blocks & Guest Accommodation Booking */}
-      <div className="bg-white border border-stone-200/80 rounded-3xl overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-200">
-        <div className="p-7 sm:p-8 border-b border-stone-100 flex flex-wrap items-start justify-between gap-6">
+      <div className="bg-white border border-stone-200 rounded-2xl overflow-hidden shadow-[0_1px_2px_rgba(28,25,23,0.04)] hover:shadow-[0_4px_16px_-4px_rgba(28,25,23,0.12)] transition-shadow motion-reduce:transition-none">
+        <div className="p-6 border-b border-stone-100 flex flex-wrap items-start justify-between gap-6">
           <div className="space-y-1">
-            <div className="flex items-center gap-2 text-xs font-semibold text-indigo-600">
+            <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.08em] text-stone-600">
               <Hotel className="w-4 h-4" />
               <span>Reserved Event Room Blocks &amp; Shuttle Logistics</span>
             </div>
-            <h3 className="text-xl font-bold text-stone-900">
+            <h3 className="text-xl font-semibold text-stone-900">
               Active Hotel Room Blocks ({hotelBlocks.length})
             </h3>
-            <p className="text-xs text-stone-500">
+            <p className="text-xs text-stone-600">
               Track guest room pickups, group discount codes, and sync room block totals to your event budget
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-6 text-right">
             <div>
-              <div className="text-[11px] text-stone-400">Rooms Booked / Blocked</div>
-              <div className="text-lg font-bold font-mono text-stone-900 tabular-nums">
+              <div className="text-xs text-stone-600">Rooms Booked / Blocked</div>
+              <div className="text-lg font-semibold font-mono text-stone-900 tabular-nums">
                 {totalRoomsBooked} / {totalRoomsBlocked} rooms
               </div>
             </div>
             <div>
-              <div className="text-[11px] text-stone-400">Total Block Value</div>
-              <div className="text-lg font-bold font-mono text-indigo-600 tabular-nums">
+              <div className="text-xs text-stone-600">Total Block Value</div>
+              <div className="text-lg font-semibold font-mono text-[#3B5943] dark:text-emerald-300 tabular-nums">
                 ${totalHotelBlockCommitment.toLocaleString('en-US', {
                   maximumFractionDigits: 0,
                 })}
@@ -1073,74 +1111,74 @@ export const CustomCategoriesAndHotelsView: React.FC<
         {/* Add Hotel Room Block Form */}
         <form
           onSubmit={handleCreateHotelBlockSubmit}
-          className="px-7 sm:px-8 py-5 bg-stone-50/70 border-b border-stone-100 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 items-end"
+          className="px-6 py-5 bg-stone-50/70 border-b border-stone-100 grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-12 gap-3 items-end"
         >
-          <div className="lg:col-span-3">
-            <label className="block text-[11px] font-medium text-stone-600 mb-1">
-              Hotel / Resort Name
-            </label>
-            <input
+          <div className="2xl:col-span-3">
+            <label className="block">
+<span className="block text-sm font-medium text-stone-800 mb-1.5">Hotel / Resort Name</span>
+<input
               type="text"
               required
               placeholder="e.g., Taj Lake Palace or Hampton Inn"
               value={hotelName}
               onChange={(e) => setHotelName(e.target.value)}
-              className="w-full px-3 py-2 text-xs bg-white border border-stone-200 rounded-xl"
+              className="w-full h-10 px-3 text-sm bg-white border border-stone-300 rounded-lg"
             />
+</label>
           </div>
-          <div className="lg:col-span-3">
-            <label className="block text-[11px] font-medium text-stone-600 mb-1">
-              Room Tier / Wing
-            </label>
-            <input
+          <div className="2xl:col-span-3">
+            <label className="block">
+<span className="block text-sm font-medium text-stone-800 mb-1.5">Room Tier / Wing</span>
+<input
               type="text"
               value={roomType}
               onChange={(e) => setRoomType(e.target.value)}
-              className="w-full px-3 py-2 text-xs bg-white border border-stone-200 rounded-xl"
+              className="w-full h-10 px-3 text-sm bg-white border border-stone-300 rounded-lg"
             />
+</label>
           </div>
-          <div className="lg:col-span-1">
-            <label className="block text-[11px] font-medium text-stone-600 mb-1">
-              Nights
-            </label>
-            <input
+          <div className="2xl:col-span-1">
+            <label className="block">
+<span className="block text-sm font-medium text-stone-800 mb-1.5">Nights</span>
+<input
               type="number"
               min={1}
               max={14}
               value={nights}
               onChange={(e) => setNights(e.target.value)}
-              className="w-full px-3 py-2 text-xs font-mono bg-white border border-stone-200 rounded-xl tabular-nums"
+              className="w-full h-10 px-3 text-sm font-mono bg-white border border-stone-300 rounded-lg tabular-nums"
             />
+</label>
           </div>
-          <div className="lg:col-span-1">
-            <label className="block text-[11px] font-medium text-stone-600 mb-1">
-              Blocked
-            </label>
-            <input
+          <div className="2xl:col-span-1">
+            <label className="block">
+<span className="block text-sm font-medium text-stone-800 mb-1.5">Blocked</span>
+<input
               type="number"
               min={1}
               max={500}
               value={roomsBlocked}
               onChange={(e) => setRoomsBlocked(e.target.value)}
-              className="w-full px-3 py-2 text-xs font-mono bg-white border border-stone-200 rounded-xl tabular-nums"
+              className="w-full h-10 px-3 text-sm font-mono bg-white border border-stone-300 rounded-lg tabular-nums"
             />
+</label>
           </div>
-          <div className="lg:col-span-2">
-            <label className="block text-[11px] font-medium text-stone-600 mb-1">
-              Nightly Group Rate ($)
-            </label>
-            <input
+          <div className="2xl:col-span-2">
+            <label className="block">
+<span className="block text-sm font-medium text-stone-800 mb-1.5">Nightly Group Rate ($)</span>
+<input
               type="number"
               min={0}
               value={nightlyRate}
               onChange={(e) => setNightlyRate(e.target.value)}
-              className="w-full px-3 py-2 text-xs font-mono bg-white border border-stone-200 rounded-xl tabular-nums"
+              className="w-full h-10 px-3 text-sm font-mono bg-white border border-stone-300 rounded-lg tabular-nums"
             />
+</label>
           </div>
-          <div className="lg:col-span-2">
+          <div className="2xl:col-span-2">
             <button
               type="submit"
-              className="w-full inline-flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-stone-900 hover:bg-stone-800 rounded-xl transition-colors"
+              className="w-full inline-flex items-center justify-center gap-1.5 h-9 px-4 text-sm font-medium inline-flex items-center justify-center text-white bg-[#3B5943] hover:bg-[#314a38] rounded-xl transition-colors"
             >
               <Plus className="w-3.5 h-3.5" />
               Add Hotel Block
@@ -1149,6 +1187,11 @@ export const CustomCategoriesAndHotelsView: React.FC<
         </form>
 
         {/* Hotel Blocks List */}
+        {hotelBlocks.length === 0 && (
+          <div className="p-6">
+            <EmptyState icon={<Hotel className="h-5 w-5" />} title="No room blocks yet" body="Add a hotel above, or use “Add as Room-Block Inquiry” on a nearby hotel." />
+          </div>
+        )}
         <div className="divide-y divide-stone-100">
           {hotelBlocks.map((block) => {
             const pickupPct =
@@ -1161,15 +1204,15 @@ export const CustomCategoriesAndHotelsView: React.FC<
             return (
               <div
                 key={block.id}
-                className="p-7 sm:p-8 flex flex-col lg:flex-row lg:items-center justify-between gap-6 hover:bg-stone-50/50 transition-colors"
+                className="p-6 flex flex-col lg:flex-row lg:items-center justify-between gap-6 hover:bg-stone-50/50 transition-colors"
               >
                 <div className="space-y-2 max-w-2xl">
                   <div className="flex flex-wrap items-center gap-2.5">
-                    <BedDouble className="w-4 h-4 text-indigo-600 shrink-0" />
-                    <h4 className="text-base font-bold text-stone-900">
+                    <BedDouble className="w-4 h-4 text-[#3B5943] dark:text-emerald-300 shrink-0" />
+                    <h4 className="text-base font-semibold text-stone-900">
                       {block.hotel_name}
                     </h4>
-                    <span className="font-mono text-xs text-stone-500">
+                    <span className="font-mono text-xs text-stone-600">
                       · Code: <strong className="text-stone-800">{block.group_code}</strong>
                     </span>
                   </div>
@@ -1181,11 +1224,11 @@ export const CustomCategoriesAndHotelsView: React.FC<
                     </span>
                   </div>
 
-                  <p className="text-xs text-stone-500 leading-relaxed">
+                  <p className="text-xs text-stone-600 leading-relaxed">
                     {block.assigned_guests_notes}
                   </p>
 
-                  <div className="flex flex-wrap items-center gap-4 pt-1 text-[11px] text-stone-500">
+                  <div className="flex flex-wrap items-center gap-4 pt-1 text-xs text-stone-600">
                     {block.shuttle_included && (
                       <span className="inline-flex items-center gap-1 text-emerald-700 font-medium">
                         <Bus className="w-3.5 h-3.5" />
@@ -1199,14 +1242,14 @@ export const CustomCategoriesAndHotelsView: React.FC<
                 <div className="flex flex-wrap sm:flex-nowrap items-center gap-5 shrink-0">
                   <div className="space-y-1.5 min-w-[160px]">
                     <div className="flex items-center justify-between text-xs">
-                      <span className="text-stone-500">Room Pickup</span>
-                      <span className="font-mono font-bold text-stone-900 tabular-nums">
+                      <span className="text-stone-600">Room Pickup</span>
+                      <span className="font-mono font-semibold text-stone-900 tabular-nums">
                         {block.rooms_booked}/{block.rooms_blocked} ({pickupPct}%)
                       </span>
                     </div>
                     <div className="w-full h-2 bg-stone-100 rounded-full overflow-hidden">
                       <div
-                        className="h-full bg-indigo-600 rounded-full transition-all"
+                        className="h-full bg-[#3B5943] rounded-full transition-all"
                         style={{ width: `${Math.min(100, pickupPct)}%` }}
                       />
                     </div>
@@ -1219,7 +1262,7 @@ export const CustomCategoriesAndHotelsView: React.FC<
                             Math.max(0, block.rooms_booked - 1)
                           )
                         }
-                        className="px-2 py-1 text-[11px] font-semibold text-stone-600 bg-stone-100 hover:bg-stone-200 rounded-lg"
+                        className="px-2 py-1 text-xs font-semibold text-stone-600 bg-stone-100 hover:bg-stone-200 rounded-lg"
                       >
                         -1 Room
                       </button>
@@ -1231,7 +1274,7 @@ export const CustomCategoriesAndHotelsView: React.FC<
                             Math.min(block.rooms_blocked, block.rooms_booked + 1)
                           )
                         }
-                        className="px-2.5 py-1 text-[11px] font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg"
+                        className="px-2.5 py-1 text-xs font-semibold text-[#3B5943] dark:text-emerald-300 bg-[#EEF4EF] hover:bg-[#DFECE2] rounded-lg"
                       >
                         +1 Book Guest Room
                       </button>
@@ -1240,8 +1283,8 @@ export const CustomCategoriesAndHotelsView: React.FC<
 
                   <div className="text-right space-y-2">
                     <div>
-                      <div className="text-[11px] text-stone-400">Block Subtotal</div>
-                      <div className="text-base font-bold font-mono text-stone-900 tabular-nums">
+                      <div className="text-xs text-stone-600">Block Subtotal</div>
+                      <div className="text-base font-semibold font-mono text-stone-900 tabular-nums">
                         ${totalBlockCost.toLocaleString('en-US', {
                           maximumFractionDigits: 0,
                         })}
@@ -1249,10 +1292,11 @@ export const CustomCategoriesAndHotelsView: React.FC<
                     </div>
                     <button
                       type="button"
+                      disabled={synced.has(`block:${block.id}`)}
                       onClick={() => handleSyncHotelBlockToBudget(block)}
-                      className="py-2 px-3 text-xs font-semibold text-stone-800 bg-stone-100 hover:bg-stone-200 rounded-xl transition-colors whitespace-nowrap"
+                      className="disabled:opacity-60 disabled:pointer-events-none h-9 px-4 text-sm font-medium inline-flex items-center justify-center text-stone-800 bg-stone-100 hover:bg-stone-200 rounded-xl transition-colors whitespace-nowrap"
                     >
-                      + Add Block to Budget
+                      {synced.has(`block:${block.id}`) ? '✓ Added to Budget' : '+ Add Block to Budget'}
                     </button>
                   </div>
                 </div>
@@ -1263,73 +1307,74 @@ export const CustomCategoriesAndHotelsView: React.FC<
       </div>
 
       {/* SECTION 4: AI Cultural & Event-Type Re-Generator + Custom Category Creator */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
-        <div className="lg:col-span-7 bg-white border border-stone-200/80 rounded-3xl p-7 sm:p-8 shadow-sm space-y-4">
-          <div className="flex items-center gap-2 text-xs font-semibold text-indigo-600">
+      <div className="grid grid-cols-1 2xl:grid-cols-12 gap-6 items-stretch">
+        <div className="2xl:col-span-7 bg-white border border-stone-200 rounded-2xl p-6 shadow-sm space-y-4">
+          <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.08em] text-stone-600">
             <Compass className="w-4 h-4" />
             <span>Re-Improvise Event Type &amp; Location with AI</span>
           </div>
-          <h3 className="text-base font-bold text-stone-900">
+          <h3 className="text-base font-semibold text-stone-900">
             Generate Custom Tabs for Any Event Type or Country
           </h3>
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              triggerAiGenerate();
+              requestGenerate();
             }}
-            className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end"
+            className="grid grid-cols-1 2xl:grid-cols-12 gap-3 items-end"
           >
-            <div className="sm:col-span-4">
-              <label className="block text-[11px] font-medium text-stone-600 mb-1">
-                Event Type
-              </label>
-              <input
+            <div className="2xl:col-span-4">
+              <label className="block">
+<span className="block text-sm font-medium text-stone-800 mb-1.5">Event Type</span>
+<input
                 type="text"
                 value={eventTypeInput}
                 onChange={(e) => setEventTypeInput(e.target.value)}
                 placeholder="e.g., funeral, wedding, sangeet..."
-                className="w-full px-3 py-2 text-xs bg-stone-50 border border-stone-200 rounded-xl"
+                className="w-full h-10 px-3 text-sm bg-white border border-stone-300 rounded-lg"
               />
+</label>
             </div>
-            <div className="sm:col-span-5">
-              <label className="block text-[11px] font-medium text-stone-600 mb-1">
-                Location / City
-              </label>
-              <input
+            <div className="2xl:col-span-5">
+              <label className="block">
+<span className="block text-sm font-medium text-stone-800 mb-1.5">Location / City</span>
+<input
                 type="text"
                 value={locationInput}
                 onChange={(e) => setLocationInput(e.target.value)}
                 placeholder="e.g., Boston, MA or Udaipur, India"
-                className="w-full px-3 py-2 text-xs bg-stone-50 border border-stone-200 rounded-xl"
+                className="w-full h-10 px-3 text-sm bg-white border border-stone-300 rounded-lg"
               />
+</label>
             </div>
-            <div className="sm:col-span-3">
-              <label className="block text-[11px] font-medium text-stone-600 mb-1">
-                Duration (Days)
-              </label>
-              <input
+            <div className="2xl:col-span-3">
+              <label className="block">
+<span className="block text-sm font-medium text-stone-800 mb-1.5">Duration (Days)</span>
+<input
                 type="number"
                 min={1}
                 max={14}
                 value={daysInput}
                 onChange={(e) => setDaysInput(e.target.value)}
-                className="w-full px-3 py-2 text-xs font-mono bg-stone-50 border border-stone-200 rounded-xl tabular-nums"
+                className="w-full h-10 px-3 text-sm font-mono bg-white border border-stone-300 rounded-lg tabular-nums"
               />
+</label>
             </div>
-            <div className="sm:col-span-8">
+            <div className="2xl:col-span-8">
               <input
                 type="text"
                 value={customAiPrompt}
                 onChange={(e) => setCustomAiPrompt(e.target.value)}
+                aria-label="Specific customs or rituals"
                 placeholder="Specific customs (e.g. who speaks first, pallbearers, 5-day Haldi/Mehendi/Sangeet)..."
-                className="w-full px-3 py-2 text-xs bg-stone-50 border border-stone-200 rounded-xl"
+                className="w-full h-10 px-3 text-sm bg-white border border-stone-300 rounded-lg"
               />
             </div>
-            <div className="sm:col-span-4">
+            <div className="2xl:col-span-4">
               <button
                 type="submit"
                 disabled={isGenerating}
-                className="w-full inline-flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-stone-900 hover:bg-stone-800 rounded-xl transition-colors"
+                className="w-full inline-flex items-center justify-center gap-1.5 h-9 px-4 text-sm font-medium inline-flex items-center justify-center text-white bg-[#3B5943] hover:bg-[#314a38] rounded-xl transition-colors"
               >
                 {isGenerating ? (
                   <>
@@ -1347,8 +1392,8 @@ export const CustomCategoriesAndHotelsView: React.FC<
           </form>
         </div>
 
-        <div className="lg:col-span-5 bg-white border border-stone-200/80 rounded-3xl p-7 sm:p-8 shadow-sm space-y-4">
-          <h3 className="text-base font-bold text-stone-900">
+        <div className="2xl:col-span-5 bg-white border border-stone-200 rounded-2xl p-6 shadow-sm space-y-4">
+          <h3 className="text-base font-semibold text-stone-900">
             Create Manual Custom Tab / Category
           </h3>
           <form
@@ -1356,17 +1401,17 @@ export const CustomCategoriesAndHotelsView: React.FC<
             className="space-y-3"
           >
             <div>
-              <label className="block text-[11px] font-medium text-stone-600 mb-1">
-                Tab / Category Title
-              </label>
-              <input
+              <label className="block">
+<span className="block text-sm font-medium text-stone-800 mb-1.5">Tab / Category Title</span>
+<input
                 type="text"
                 required
                 placeholder="e.g., Eulogy & Speaking Order (Who Speaks First)"
                 value={newCatTitle}
                 onChange={(e) => setNewCatTitle(e.target.value)}
-                className="w-full px-3 py-2 text-xs bg-stone-50 border border-stone-200 rounded-xl"
+                className="w-full h-10 px-3 text-sm bg-white border border-stone-300 rounded-lg"
               />
+</label>
             </div>
             <div className="grid grid-cols-2 gap-2.5">
               <select
@@ -1375,7 +1420,7 @@ export const CustomCategoriesAndHotelsView: React.FC<
                 onChange={(e) =>
                   setNewCatType(e.target.value as CustomModuleType)
                 }
-                className="px-3 py-2 text-xs bg-stone-50 border border-stone-200 rounded-xl"
+                className="h-10 px-3 text-sm bg-white border border-stone-300 rounded-lg"
               >
                 <option value="speaking_order">Speaking Order (Who First)</option>
                 <option value="multi_day_itinerary">Multi-Day Schedule</option>
@@ -1384,7 +1429,7 @@ export const CustomCategoriesAndHotelsView: React.FC<
               </select>
               <button
                 type="submit"
-                className="inline-flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition-colors"
+                className="inline-flex items-center justify-center gap-1.5 h-9 px-4 text-sm font-medium inline-flex items-center justify-center text-white bg-[#3B5943] hover:bg-[#314a38] rounded-xl transition-colors"
               >
                 <Plus className="w-3.5 h-3.5" />
                 Add Custom Tab
@@ -1393,6 +1438,31 @@ export const CustomCategoriesAndHotelsView: React.FC<
           </form>
         </div>
       </div>
+
+      <Modal
+        open={pendingGenerate !== null}
+        onClose={() => setPendingGenerate(null)}
+        locked={isGenerating}
+        eyebrow="Replace existing plans?"
+        title="Generate new custom tabs?"
+        footer={
+          <>
+            <Button data-autofocus onClick={() => setPendingGenerate(null)}>Cancel</Button>
+            <Button
+              variant="primary"
+              onClick={() => {
+                const o = pendingGenerate?.override;
+                setPendingGenerate(null);
+                void triggerAiGenerate(o);
+              }}
+            >
+              Replace and generate
+            </Button>
+          </>
+        }
+      >
+        This replaces your {customModules.length} custom tab{customModules.length === 1 ? '' : 's'} and {hotelBlocks.length} room block{hotelBlocks.length === 1 ? '' : 's'} with newly generated ones. Items you added by hand in those tabs will be lost. Your budget and schedule are not changed.
+      </Modal>
     </div>
   );
 };

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { postJson } from '../lib/api';
 import { safeHttpUrl } from '../lib/url';
 import { buildIcs, downloadTextFile, safeFilename } from '../lib/exporters';
@@ -44,6 +44,7 @@ import {
   syncGoogleCalendarRsvpStatuses,
   type User,
 } from '../lib/googleCalendarRsvp';
+import { Badge, Button, Card, CardHeader, EmptyState, Field, HEX_RE, Modal, Notice, PageHeader, cx, focusRing, inputCls } from './ui/kit';
 
 interface ThemeAndRsvpViewProps {
   event: EventRecord;
@@ -274,10 +275,13 @@ export const ThemeAndRsvpView: React.FC<ThemeAndRsvpViewProps> = ({
     );
   };
 
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (copyTimer.current) clearTimeout(copyTimer.current); }, []);
   const handleCopyHex = (hex: string) => {
     navigator.clipboard?.writeText(hex).catch(() => undefined);
     setCopiedHex(hex);
-    setTimeout(() => setCopiedHex(null), 1500);
+    if (copyTimer.current) clearTimeout(copyTimer.current);
+    copyTimer.current = setTimeout(() => setCopiedHex(null), 1500);
   };
 
   const handleImageFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -298,6 +302,7 @@ export const ThemeAndRsvpView: React.FC<ThemeAndRsvpViewProps> = ({
         setUploadedPreviewUrl(reader.result);
       }
     };
+    reader.onerror = () => setMoodboardError('That image could not be read. Please try another file.');
     reader.readAsDataURL(file);
   };
 
@@ -332,8 +337,8 @@ export const ThemeAndRsvpView: React.FC<ThemeAndRsvpViewProps> = ({
     if (!guestName.trim()) return;
     onAddRsvp({
       guest_name: guestName.trim(),
-      contact: guestContact.trim() || 'guest@invitation.example',
-      party_size: Math.max(1, Number(partySize) || 1),
+      contact: guestContact.trim(), // never invent an address: invites are only sent to valid, user-entered emails
+      party_size: Math.min(20, Math.max(1, Math.round(Number(partySize)) || 1)),
       status: 'pending',
       dietary_requirements: dietary.trim() || 'None',
       seating_table: seatingTable.trim() || 'General Seating',
@@ -349,180 +354,111 @@ export const ThemeAndRsvpView: React.FC<ThemeAndRsvpViewProps> = ({
     .filter((r) => r.status === 'confirmed')
     .reduce((acc, r) => acc + r.party_size, 0);
 
+  const filters = ['ALL', 'confirmed', 'pending', 'declined'] as const;
+  const googleBadge = (status: string | undefined, contact: string) => {
+    if (status === 'accepted') return <Badge tone="good">Accepted</Badge>;
+    if (status === 'declined') return <Badge tone="bad">Declined</Badge>;
+    if (status === 'tentative') return <Badge tone="warn">Maybe</Badge>;
+    if (status === 'needsAction') return <Badge>Invited · awaiting reply</Badge>;
+    return <span className="text-sm text-stone-600">{isValidEmailAddress(contact) ? 'Ready to invite' : 'Needs valid email'}</span>;
+  };
+
   return (
-    <div className="space-y-8">
-      {/* Section 1: Google Calendar RSVP Invitation & Two-Way Response Sync Bento Card */}
-      <div className="bg-white border border-stone-200/80 rounded-3xl p-7 sm:p-8 shadow-sm hover:shadow-md transition-shadow duration-200 space-y-6">
-        <div className="flex flex-wrap items-start justify-between gap-6">
-          <div className="space-y-1.5 max-w-2xl">
-            <div className="flex items-center gap-2 text-xs font-semibold text-indigo-600">
-              <Calendar className="w-4 h-4" />
-              <span>Google Calendar Events Integration</span>
-            </div>
-            <h2 className="text-xl font-bold text-stone-900">
-              Send Email Invitations &amp; Sync Guest RSVPs
-            </h2>
-            <p className="text-xs text-stone-500 leading-relaxed">
-              Put <strong className="text-stone-800">{event.title}</strong> ({event.date}) on your Google Calendar and invite your guests —
-              no account linking needed (use <strong className="text-stone-800">Add to Google Calendar</strong> below). Optionally enable
-              two-way sync with your own free Google Cloud OAuth client to pull guests’ Yes/No answers back in automatically.
-            </p>
-          </div>
-
-          {/* Auth & Sync Controls */}
-          <div className="flex flex-wrap items-center gap-3">
-            {needsAuth || !accessToken ? (
-              !clientId ? (
-              <button
-                type="button"
-                onClick={() => setShowSetup((v) => !v)}
-                className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-stone-800 bg-stone-100 hover:bg-stone-200 rounded-2xl transition-colors"
-              >
+    <div className="space-y-6">
+      <PageHeader
+        icon={<Calendar className="h-4 w-4" />}
+        eyebrow="Guests & RSVPs"
+        title="Invite guests and track RSVPs"
+        description={
+          <>
+            Put <strong className="font-medium text-stone-900">{event.title}</strong> ({event.date}) on Google Calendar and invite your guests. No account linking is needed. Optionally connect your own free Google Cloud OAuth client for two-way sync.
+          </>
+        }
+        stat={{ value: confirmedHeadcount, label: `confirmed guests · ${rsvps.length} households` }}
+        actions={
+          needsAuth || !accessToken ? (
+            !clientId ? (
+              <Button aria-expanded={showSetup} onClick={() => setShowSetup((v) => !v)}>
                 Enable two-way sync (optional)
-              </button>
-              ) : (
-              <button
-                type="button"
-                onClick={handleGoogleLogin}
-                disabled={isLoggingIn}
-                className="gsi-material-button inline-flex items-center gap-3 px-4 py-2.5 bg-white hover:bg-stone-50 text-stone-800 text-xs font-semibold border border-stone-300 rounded-2xl shadow-2xs transition-colors cursor-pointer disabled:opacity-60"
-              >
-                <div className="w-4 h-4 shrink-0">
-                  <svg
-                    version="1.1"
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 48 48"
-                    style={{ display: 'block', width: '100%', height: '100%' }}
-                  >
-                    <path
-                      fill="#EA4335"
-                      d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"
-                    />
-                    <path
-                      fill="#4285F4"
-                      d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"
-                    />
-                    <path
-                      fill="#FBBC05"
-                      d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"
-                    />
-                    <path
-                      fill="#34A853"
-                      d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
-                    />
-                    <path fill="none" d="M0 0h48v48H0z" />
-                  </svg>
-                </div>
-                <span>
-                  {isLoggingIn ? 'Signing in...' : 'Sign in with Google'}
-                </span>
-              </button>
-              )
+              </Button>
             ) : (
-              <div className="flex flex-wrap items-center gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => setIsConfirmInviteModalOpen(true)}
-                  disabled={isSendingInvites || validEmailGuests.length === 0}
-                  className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 rounded-2xl transition-colors"
+              <Button onClick={handleGoogleLogin} disabled={isLoggingIn} aria-busy={isLoggingIn}>
+                <svg aria-hidden="true" viewBox="0 0 48 48" className="h-4 w-4 shrink-0">
+                  <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+                  <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+                  <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+                  <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+                </svg>
+                {isLoggingIn ? 'Signing in…' : 'Sign in with Google'}
+              </Button>
+            )
+          ) : (
+            <>
+              <Button variant="primary" onClick={() => setIsConfirmInviteModalOpen(true)} disabled={isSendingInvites || validEmailGuests.length === 0}>
+                <Send aria-hidden="true" className="h-4 w-4" />
+                {event.google_calendar_event_id ? `Update & resend invites (${validEmailGuests.length})` : `Send calendar invites (${validEmailGuests.length})`}
+              </Button>
+              {event.google_calendar_event_id && (
+                <Button onClick={handleSyncFromGoogleCalendar} disabled={isSyncingCalendar} aria-busy={isSyncingCalendar}>
+                  <RefreshCw aria-hidden="true" className={cx('h-4 w-4', isSyncingCalendar && 'animate-spin motion-reduce:animate-none')} />
+                  {isSyncingCalendar ? 'Syncing…' : 'Sync responses'}
+                </Button>
+              )}
+              {event.google_calendar_html_link && (
+                <a
+                  href={safeHttpUrl(event.google_calendar_html_link) ?? '#'}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={cx('inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium text-[#3B5943] hover:bg-[#EEF4EF] dark:text-emerald-300', focusRing)}
                 >
-                  <Send className="w-3.5 h-3.5" />
-                  {event.google_calendar_event_id
-                    ? `Update & Resend Invites (${validEmailGuests.length})`
-                    : `Send Calendar Invites (${validEmailGuests.length})`}
-                </button>
-
-                {event.google_calendar_event_id && (
-                  <button
-                    type="button"
-                    onClick={handleSyncFromGoogleCalendar}
-                    disabled={isSyncingCalendar}
-                    className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-stone-800 bg-stone-100 hover:bg-stone-200 disabled:opacity-50 rounded-2xl transition-colors"
-                  >
-                    <RefreshCw
-                      className={`w-3.5 h-3.5 ${isSyncingCalendar ? 'animate-spin' : ''}`}
-                    />
-                    {isSyncingCalendar ? 'Syncing RSVPs...' : 'Sync Responses'}
-                  </button>
-                )}
-
-                {event.google_calendar_html_link && (
-                  <a
-                    href={safeHttpUrl(event.google_calendar_html_link) ?? '#'}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-semibold text-indigo-700 bg-indigo-50/80 hover:bg-indigo-100 rounded-2xl transition-colors"
-                  >
-                    Open in Calendar <ExternalLink className="w-3.5 h-3.5" />
-                  </a>
-                )}
-
-                <button
-                  type="button"
-                  onClick={handleGoogleLogout}
-                  title={`Signed in as ${googleUser?.email || 'Google User'}`}
-                  className="inline-flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium text-stone-500 hover:text-stone-900 rounded-xl transition-colors"
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                  Sign out
-                </button>
-              </div>
-            )}
+                  Open in Calendar <ExternalLink aria-hidden="true" className="h-4 w-4" />
+                </a>
+              )}
+              <Button variant="ghost" onClick={handleGoogleLogout} title={`Signed in as ${googleUser?.email || 'Google user'}`}>
+                <LogOut aria-hidden="true" className="h-4 w-4" /> Sign out
+              </Button>
+            </>
+          )
+        }
+      >
+        <dl className="flex flex-wrap items-center gap-x-6 gap-y-1 border-t border-stone-100 pt-4 text-sm text-stone-600">
+          <div>
+            <dt className="inline">Account: </dt>
+            <dd className="inline font-medium text-stone-900">{googleUser?.email || 'Not connected'}</dd>
           </div>
-        </div>
-
-        {/* Connection status bar */}
-        <div className="pt-4 border-t border-stone-100 flex flex-wrap items-center justify-between gap-4 text-xs text-stone-500">
-          <div className="flex flex-wrap items-center gap-4">
-            <span>
-              Account:{' '}
-              <strong className="text-stone-800">
-                {googleUser?.email || 'Not connected'}
-              </strong>
-            </span>
-            <span aria-hidden="true">·</span>
-            <span>
-              Eligible Email Guests:{' '}
-              <strong className="font-mono text-stone-800 tabular-nums">
-                {validEmailGuests.length} of {rsvps.length}
-              </strong>
-            </span>
-            {event.google_calendar_last_synced_at && (
-              <>
-                <span aria-hidden="true">·</span>
-                <span>
-                  Last Synced:{' '}
-                  <strong className="font-mono text-stone-800 tabular-nums">
-                    {new Date(event.google_calendar_last_synced_at).toLocaleTimeString([], {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                      second: '2-digit',
-                    })}
-                  </strong>
-                </span>
-              </>
-            )}
+          <div>
+            <dt className="inline">Eligible email guests: </dt>
+            <dd className="inline font-mono font-medium tabular-nums text-stone-900">{validEmailGuests.length} of {rsvps.length}</dd>
           </div>
-        </div>
+          {event.google_calendar_last_synced_at && (
+            <div>
+              <dt className="inline">Last synced: </dt>
+              <dd className="inline font-mono font-medium tabular-nums text-stone-900">
+                {new Date(event.google_calendar_last_synced_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+              </dd>
+            </div>
+          )}
+        </dl>
 
         {showSetup && !clientId && (
-          <div className="p-5 rounded-2xl bg-stone-50 border border-stone-200 space-y-3 text-xs text-stone-600">
-            <h4 className="text-xs font-bold text-stone-900">Enable two-way sync with your own Google OAuth client (free, ~3 min)</h4>
-            <ol className="list-decimal pl-5 space-y-1 leading-relaxed">
-              <li>In <a className="text-[#4A6B53] hover:underline" href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener noreferrer">Google Cloud Console</a>, create a project and enable the <strong>Google Calendar API</strong>.</li>
+          <div className="mt-4 space-y-3 rounded-xl border border-stone-200 bg-stone-50 p-5 text-sm leading-5 text-stone-600">
+            <h4 className="font-semibold text-stone-900">Enable two-way sync with your own Google OAuth client (free, ~3 min)</h4>
+            <ol className="list-decimal space-y-1 pl-5">
+              <li>In <a className="font-medium text-[#3B5943] underline dark:text-emerald-300" href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener noreferrer">Google Cloud Console</a>, create a project and enable the <strong>Google Calendar API</strong>.</li>
               <li>Under <strong>Google Auth platform → Clients</strong>, create an <strong>OAuth client ID</strong> of type <strong>Web application</strong>.</li>
               <li>Add <code className="font-mono">{typeof window !== 'undefined' ? window.location.origin : ''}</code> as an <strong>Authorized JavaScript origin</strong>.</li>
-              <li>Keep the app in “Testing” and add your own Google account as a test user. Paste the Client ID below.</li>
+              <li>Keep the app in “Testing”, add your own Google account as a test user, and paste the Client ID below.</li>
             </ol>
             <div className="flex flex-wrap gap-2">
               <input
+                aria-label="Google OAuth Client ID"
                 value={clientDraft}
                 onChange={(e) => setClientDraft(e.target.value)}
                 placeholder="1234567890-abc123.apps.googleusercontent.com"
-                className="flex-1 min-w-[240px] px-3 py-2 border border-stone-300 rounded-xl font-mono"
+                className={cx(inputCls, 'min-w-[240px] flex-1 font-mono text-xs')}
               />
-              <button
-                type="button"
+              <Button
+                variant="primary"
                 onClick={() => {
                   if (!isValidGoogleClientId(clientDraft)) {
                     setSetupError('That does not look like a Google OAuth Client ID (…apps.googleusercontent.com).');
@@ -534,121 +470,63 @@ export const ThemeAndRsvpView: React.FC<ThemeAndRsvpViewProps> = ({
                   setSetupError(null);
                   setShowSetup(false);
                 }}
-                className="px-4 py-2 font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl"
               >
                 Save Client ID
-              </button>
+              </Button>
             </div>
-            {setupError && <p role="alert" className="text-rose-700">{setupError}</p>}
-            <p className="text-[11px] text-stone-400 leading-relaxed">
-              A Client ID is not a secret. The sign-in happens directly between your browser and Google; PlanGenie only asks for permission to manage events on your calendar and keeps the token in memory.
-            </p>
+            {setupError && <p role="alert" className="font-medium text-rose-700 dark:text-rose-300">{setupError}</p>}
+            <p className="text-xs leading-4">A Client ID is not a secret. Sign-in happens directly between your browser and Google; PlanGenie only asks for permission to manage events on your calendar and keeps the token in memory.</p>
           </div>
         )}
         {clientId && (
-          <p className="text-[11px] text-stone-400">
+          <p className="mt-4 text-sm text-stone-600">
             Using your Google OAuth client.{' '}
-            <button type="button" className="underline hover:text-stone-600" onClick={() => { setGoogleClientId(''); setClientId(''); setNeedsAuth(true); }}>
+            <button type="button" className={cx('rounded font-medium underline hover:text-stone-900', focusRing)} onClick={() => { setGoogleClientId(''); setClientId(''); setNeedsAuth(true); }}>
               Remove
             </button>
           </p>
         )}
+      </PageHeader>
 
-        {/* Keyless alternatives: work without any Google/Firebase configuration */}
-        <div className="pt-4 border-t border-stone-100 space-y-3">
-          <div>
-            <h4 className="text-xs font-bold text-stone-900">Invite guests without Google</h4>
-            <p className="text-[11px] text-stone-500">
-              No account needed — email your guests directly, or share a calendar file they can open in any app.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={handleAddToGoogleCalendar}
-              className="px-3.5 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl"
-            >
-              Add to Google Calendar
-            </button>
-            <button
-              type="button"
-              disabled={pendingEmails.length === 0}
-              onClick={handleMailtoReminder}
-              className="px-3.5 py-2 text-xs font-semibold text-[#4A6B53] bg-[#EDF3EE] hover:bg-[#DFECE1] disabled:opacity-50 rounded-xl"
-            >
-              Email {pendingEmails.length} guest{pendingEmails.length === 1 ? '' : 's'} awaiting reply
-            </button>
-            <button
-              type="button"
-              onClick={handleCopyInviteText}
-              className="px-3.5 py-2 text-xs font-semibold text-stone-700 bg-stone-100 hover:bg-stone-200 rounded-xl"
-            >
-              Copy invite message
-            </button>
-            <button
-              type="button"
-              onClick={handleDownloadInviteIcs}
-              className="px-3.5 py-2 text-xs font-semibold text-stone-700 bg-stone-100 hover:bg-stone-200 rounded-xl"
-            >
-              Download invite (.ics)
-            </button>
-          </div>
+      <Card aria-labelledby="rsvp-nogoogle" className="space-y-4 p-6">
+        <CardHeader id="rsvp-nogoogle" eyebrow="No Google account needed" title="Invite guests your way" />
+        <div className="flex flex-wrap gap-2">
+          <Button variant="primary" onClick={handleAddToGoogleCalendar}>Add to Google Calendar</Button>
+          <Button disabled={pendingEmails.length === 0} onClick={handleMailtoReminder}>
+            Email {pendingEmails.length} guest{pendingEmails.length === 1 ? '' : 's'} awaiting reply
+          </Button>
+          <Button onClick={handleCopyInviteText}>Copy invite message</Button>
+          <Button onClick={handleDownloadInviteIcs}>Download invite (.ics)</Button>
         </div>
-
         {calendarFeedback && (
-          <div
-            className={`p-4 rounded-2xl border text-xs flex items-start justify-between gap-3 ${
-              calendarFeedback.type === 'success'
-                ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
-                : 'bg-rose-50/70 border-rose-200 text-rose-900'
-            }`}
-          >
-            <div className="flex items-start gap-2.5">
-              {calendarFeedback.type === 'success' ? (
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-              ) : (
-                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-              )}
-              <span className="leading-relaxed">{calendarFeedback.message}</span>
-            </div>
-            <button
-              type="button"
-              onClick={() => setCalendarFeedback(null)}
-              className="text-stone-400 hover:text-stone-700"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
+          <Notice kind={calendarFeedback.type} onDismiss={() => setCalendarFeedback(null)}>
+            {calendarFeedback.message}
+          </Notice>
         )}
-      </div>
+      </Card>
 
-      {/* Section 2: Guest RSVPs & Dietary Seating Matrix */}
-      <div className="bg-white border border-stone-200/80 rounded-3xl overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-200">
-        <div className="p-7 sm:p-8 border-b border-stone-100 flex flex-wrap items-center justify-between gap-4">
+      <Card aria-labelledby="rsvp-list" className="overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-stone-100 p-6">
           <div>
-            <h3 className="text-lg font-bold text-stone-900 flex items-center gap-2">
-              <Users className="w-4 h-4 text-indigo-600" />
-              Guest RSVP List &amp; Seating Assignments
+            <h3 id="rsvp-list" className="flex items-center gap-2 text-base font-semibold leading-6 text-stone-900">
+              <Users aria-hidden="true" className="h-4 w-4" /> Guest list & seating
             </h3>
-            <p className="text-xs text-stone-500 mt-0.5">
-              Confirmed Party Headcount:{' '}
-              <span className="font-mono font-semibold text-stone-900 tabular-nums">
-                {confirmedHeadcount} guests
-              </span>{' '}
-              across {rsvps.length} households
+            <p className="text-sm text-stone-600">
+              <span className="font-mono font-medium tabular-nums text-stone-900">{confirmedHeadcount}</span> confirmed across {rsvps.length} households
             </p>
           </div>
-
-          <div className="flex items-center gap-1 p-1 bg-stone-100 rounded-2xl">
-            {(['ALL', 'confirmed', 'pending', 'declined'] as const).map((st) => (
+          <div role="group" aria-label="Filter guests by RSVP status" className="flex max-w-full gap-1 overflow-x-auto rounded-xl bg-stone-100 p-1">
+            {filters.map((st) => (
               <button
                 key={st}
+                type="button"
+                aria-pressed={rsvpFilter === st}
                 onClick={() => setRsvpFilter(st)}
-                className={`px-3 py-1.5 text-xs font-medium rounded-xl capitalize transition-colors whitespace-nowrap shrink-0 ${
-                  rsvpFilter === st
-                    ? 'bg-white text-stone-900 shadow-2xs'
-                    : 'text-stone-600 hover:text-stone-900'
-                }`}
+                className={cx(
+                  'h-8 shrink-0 whitespace-nowrap rounded-lg px-3 text-sm font-medium capitalize transition-[background-color,box-shadow,color] motion-reduce:transition-none',
+                  rsvpFilter === st ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-700 hover:text-stone-900',
+                  focusRing
+                )}
               >
                 {st === 'ALL' ? `All (${rsvps.length})` : st}
               </button>
@@ -656,146 +534,75 @@ export const ThemeAndRsvpView: React.FC<ThemeAndRsvpViewProps> = ({
           </div>
         </div>
 
-        {/* Quick Add Guest Form (with explicit Email input for Google Calendar RSVP Invites) */}
-        <form
-          onSubmit={handleAddRsvpSubmit}
-          className="px-7 sm:px-8 py-5 bg-stone-50/70 border-b border-stone-100 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 items-end"
-        >
-          <div className="lg:col-span-3">
-            <label className="block text-[11px] font-medium text-stone-600 mb-1">
-              Guest / Household Name
-            </label>
-            <input
-              type="text"
-              required
-              placeholder="e.g., Jordan & Taylor Reed"
-              value={guestName}
-              onChange={(e) => setGuestName(e.target.value)}
-              className="w-full px-3 py-2 text-xs bg-white border border-stone-200/90 rounded-xl"
-            />
-          </div>
-          <div className="lg:col-span-3">
-            <label className="block text-[11px] font-medium text-stone-600 mb-1">
-              Guest Email (for Google Calendar Invite)
-            </label>
-            <input
-              type="email"
-              required
-              placeholder="e.g., guest@example.com"
-              value={guestContact}
-              onChange={(e) => setGuestContact(e.target.value)}
-              className="w-full px-3 py-2 text-xs bg-white border border-stone-200/90 rounded-xl"
-            />
-          </div>
-          <div className="lg:col-span-1">
-            <label className="block text-[11px] font-medium text-stone-600 mb-1">
-              Party Size
-            </label>
-            <input
-              type="number"
-              min={1}
-              max={20}
-              value={partySize}
-              aria-label="Party size"
-              onChange={(e) => setPartySize(e.target.value)}
-              className="w-full px-3 py-2 text-xs font-mono bg-white border border-stone-200/90 rounded-xl tabular-nums"
-            />
-          </div>
-          <div className="lg:col-span-2">
-            <label className="block text-[11px] font-medium text-stone-600 mb-1">
-              Dietary Notes
-            </label>
-            <input
-              type="text"
-              value={dietary}
-              aria-label="Dietary notes"
-              onChange={(e) => setDietary(e.target.value)}
-              className="w-full px-3 py-2 text-xs bg-white border border-stone-200/90 rounded-xl"
-            />
-          </div>
-          <div className="lg:col-span-3">
-            <button
-              type="submit"
-              className="w-full inline-flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-stone-900 hover:bg-stone-800 rounded-xl transition-colors whitespace-nowrap"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Add Guest to Invite List
-            </button>
+        <form onSubmit={handleAddRsvpSubmit} className="grid grid-cols-1 items-end gap-4 border-b border-stone-100 bg-stone-50 p-6 sm:grid-cols-2 2xl:grid-cols-12">
+          <Field label="Guest / household" className="2xl:col-span-3">
+            <input type="text" required maxLength={80} placeholder="e.g. Jordan & Taylor Reed" value={guestName} onChange={(e) => setGuestName(e.target.value)} className={inputCls} />
+          </Field>
+          <Field label="Email (for calendar invite)" className="2xl:col-span-3">
+            <input type="email" required maxLength={120} placeholder="guest@example.com" value={guestContact} onChange={(e) => setGuestContact(e.target.value)} className={inputCls} />
+          </Field>
+          <Field label="Party size" className="2xl:col-span-2">
+            <input type="number" min={1} max={20} value={partySize} onChange={(e) => setPartySize(e.target.value)} className={cx(inputCls, 'font-mono tabular-nums')} />
+          </Field>
+          <Field label="Dietary notes" className="2xl:col-span-2">
+            <input type="text" maxLength={120} value={dietary} onChange={(e) => setDietary(e.target.value)} className={inputCls} />
+          </Field>
+          <div className="2xl:col-span-2">
+            <Button type="submit" variant="primary" className="w-full">
+              <Plus aria-hidden="true" className="h-4 w-4" /> Add guest
+            </Button>
           </div>
         </form>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="border-b border-stone-100 bg-stone-50/40 text-[11px] font-semibold text-stone-500">
-                <th className="py-3.5 px-7">Guest Party &amp; Email</th>
-                <th className="py-3.5 px-3 text-right">Party Size</th>
-                <th className="py-3.5 px-4">Dietary Notes</th>
-                <th className="py-3.5 px-4">Seating Table</th>
-                <th className="py-3.5 px-4">Google Calendar Invite</th>
-                <th className="py-3.5 px-7 text-right">RSVP Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-stone-100 text-xs">
-              {filteredRsvps.map((rsvp) => {
-                const googleStatus = rsvp.google_response_status;
-                return (
-                  <tr key={rsvp.id} className="hover:bg-stone-50/60 transition-colors">
-                    <td className="py-3.5 px-7">
+        {filteredRsvps.length === 0 ? (
+          <div className="p-6">
+            <EmptyState
+              icon={<Users className="h-5 w-5" />}
+              title={rsvps.length === 0 ? 'No guests yet' : 'No guests match this filter'}
+              body={rsvps.length === 0 ? 'Add your first household above to start tracking RSVPs and dietary needs.' : 'Try a different status to see the rest of your list.'}
+              action={rsvps.length > 0 ? <Button onClick={() => setRsvpFilter('ALL')}>Show all guests</Button> : undefined}
+            />
+          </div>
+        ) : (
+          <div className="relative overflow-x-auto">
+            <table className="w-full border-collapse text-left">
+              <caption className="sr-only">Guest RSVP list</caption>
+              <thead>
+                <tr className="border-b border-stone-100 bg-stone-50 text-xs font-medium uppercase tracking-[0.06em] text-stone-600">
+                  <th scope="col" className="px-6 py-3">Guest & email</th>
+                  <th scope="col" className="px-3 py-3 text-right">Party</th>
+                  <th scope="col" className="px-4 py-3">Dietary</th>
+                  <th scope="col" className="px-4 py-3">Table</th>
+                  <th scope="col" className="px-4 py-3">Calendar invite</th>
+                  <th scope="col" className="px-6 py-3 text-right">RSVP</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-stone-100 text-sm">
+                {filteredRsvps.map((rsvp) => (
+                  <tr key={rsvp.id} className="transition-colors hover:bg-stone-50 motion-reduce:transition-none">
+                    <td className="px-6 py-3.5">
                       <div className="font-semibold text-stone-900">{rsvp.guest_name}</div>
-                      <div className="text-[11px] text-stone-500 flex items-center gap-1.5 mt-0.5">
-                        <Mail className="w-3 h-3 text-stone-400" />
-                        <span>{rsvp.contact}</span>
+                      <div className="mt-0.5 flex items-center gap-1.5 text-xs text-stone-600">
+                        <Mail aria-hidden="true" className="h-3 w-3" />
+                        <span>{rsvp.contact || 'No email'}</span>
                         {rsvp.vip_tag && (
                           <>
                             <span aria-hidden="true">·</span>
-                            <span className="text-indigo-700 font-medium">{rsvp.vip_tag}</span>
+                            <span className="font-medium text-[#8C6226] dark:text-amber-300">{rsvp.vip_tag}</span>
                           </>
                         )}
                       </div>
                     </td>
-                    <td className="py-3.5 px-3 text-right font-mono tabular-nums font-semibold text-stone-900">
-                      {rsvp.party_size}
-                    </td>
-                    <td className="py-3.5 px-4 text-stone-700">{rsvp.dietary_requirements}</td>
-                    <td className="py-3.5 px-4 text-stone-600">{rsvp.seating_table}</td>
-                    <td className="py-3.5 px-4">
-                      {googleStatus === 'accepted' && (
-                        <span className="text-emerald-700 font-medium">
-                          Accepted via Calendar Email
-                        </span>
-                      )}
-                      {googleStatus === 'declined' && (
-                        <span className="text-rose-700 font-medium">
-                          Declined via Calendar Email
-                        </span>
-                      )}
-                      {googleStatus === 'tentative' && (
-                        <span className="text-amber-700 font-medium">
-                          Maybe (Tentative)
-                        </span>
-                      )}
-                      {googleStatus === 'needsAction' && (
-                        <span className="text-indigo-700 font-medium">
-                          Email Sent · Awaiting Reply
-                        </span>
-                      )}
-                      {!googleStatus && (
-                        <span className="text-stone-400">
-                          {isValidEmailAddress(rsvp.contact)
-                            ? 'Ready to invite'
-                            : 'Needs valid email'}
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-3.5 px-7 text-right">
+                    <td className="px-3 py-3.5 text-right font-mono font-semibold tabular-nums text-stone-900">{rsvp.party_size}</td>
+                    <td className="px-4 py-3.5 text-stone-700">{rsvp.dietary_requirements}</td>
+                    <td className="px-4 py-3.5 text-stone-600">{rsvp.seating_table}</td>
+                    <td className="px-4 py-3.5">{googleBadge(rsvp.google_response_status, rsvp.contact)}</td>
+                    <td className="px-6 py-3.5 text-right">
                       <select
                         aria-label={`RSVP status for ${rsvp.guest_name}`}
                         value={rsvp.status}
-                        onChange={(e) =>
-                          onUpdateRsvpStatus(rsvp.id, e.target.value as RsvpStatus)
-                        }
-                        className="px-3 py-1.5 text-xs font-medium border border-stone-200 rounded-xl bg-white capitalize"
+                        onChange={(e) => onUpdateRsvpStatus(rsvp.id, e.target.value as RsvpStatus)}
+                        className={cx(inputCls, '!h-8 !w-auto capitalize')}
                       >
                         <option value="confirmed">Confirmed</option>
                         <option value="pending">Pending</option>
@@ -803,323 +610,194 @@ export const ThemeAndRsvpView: React.FC<ThemeAndRsvpViewProps> = ({
                       </select>
                     </td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Section 3: Theme & Ideation Agent (Moodboard Vision Studio) in Bento Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
-        {/* Left 5 cols: Visual Moodboard Canvas & Vision Upload */}
-        <div className="lg:col-span-5 bg-white border border-stone-200/80 rounded-3xl p-7 sm:p-8 flex flex-col justify-between space-y-5 shadow-sm hover:shadow-md transition-shadow duration-200">
-          <div>
-            <h2 className="text-base font-bold text-stone-900 flex items-center gap-2">
-              <Palette className="w-4 h-4 text-indigo-600" />
-              Event Moodboard &amp; Vision Studio
-            </h2>
-            <p className="text-xs text-stone-500 mt-0.5">
-              Upload a moodboard image or describe your aesthetic to extract color swatches, decor, and menu pairings
-            </p>
+                ))}
+              </tbody>
+            </table>
           </div>
+        )}
+      </Card>
 
-          <div className="relative rounded-2xl overflow-hidden border border-stone-200 bg-stone-900 aspect-4/3 flex flex-col justify-end p-5">
+      <div className="grid grid-cols-1 items-stretch gap-6 2xl:grid-cols-12">
+        <Card aria-labelledby="mood-studio" className="flex flex-col justify-between gap-5 p-6 2xl:col-span-5">
+          <CardHeader id="mood-studio" eyebrow="Moodboard" title="Vision studio" />
+          <p className="-mt-3 text-sm leading-5 text-stone-600">Upload an image or describe your aesthetic to extract colours, decor and menu pairings.</p>
+
+          <div className="relative flex aspect-[4/3] flex-col justify-end overflow-hidden rounded-xl border border-stone-200 bg-stone-900 p-5">
             {uploadedPreviewUrl ? (
-              <img
-                src={uploadedPreviewUrl}
-                alt="Uploaded event moodboard preview"
-                referrerPolicy="no-referrer"
-                className="absolute inset-0 w-full h-full object-cover"
-              />
+              <img src={uploadedPreviewUrl} alt="Uploaded event moodboard preview" referrerPolicy="no-referrer" className="absolute inset-0 h-full w-full object-cover" />
             ) : (
               <div
+                aria-hidden="true"
                 className="absolute inset-0"
                 style={{
-                  background: `radial-gradient(circle at 20% 20%, ${
-                    moodboard.color_Swatches[0]?.hex ?? '#5F6F52'
-                  } 0%, ${moodboard.color_Swatches[1]?.hex ?? '#C87D55'} 48%, #1e293b 100%)`,
+                  background: `radial-gradient(circle at 20% 20%, ${HEX_RE.test(moodboard.color_Swatches[0]?.hex ?? '') ? moodboard.color_Swatches[0].hex : '#5F6F52'} 0%, ${HEX_RE.test(moodboard.color_Swatches[1]?.hex ?? '') ? moodboard.color_Swatches[1].hex : '#C87D55'} 48%, #1e293b 100%)`,
                 }}
-              >
-                <svg
-                  className="w-full h-full opacity-25"
-                  viewBox="0 0 400 300"
-                  fill="none"
-                  xmlns="http://www.w3.org/2000/svg"
-                >
-                  <circle cx="200" cy="150" r="110" stroke="white" strokeWidth="1" />
-                  <path d="M90 300 C90 180 310 180 310 300" stroke="white" strokeWidth="1.5" />
-                  <line x1="0" y1="220" x2="400" y2="220" stroke="white" strokeWidth="0.75" />
-                </svg>
-              </div>
+              />
             )}
-            <div className="relative z-10 bg-gradient-to-t from-black/85 via-black/50 to-transparent -m-5 p-5 pt-12 text-white">
-              <div className="text-[11px] font-mono text-white/80">
-                {moodboard.style_archetype}
-              </div>
-              <h3 className="text-lg font-semibold mt-0.5">{moodboard.title}</h3>
+            <div className="relative z-10 -m-5 bg-gradient-to-t from-black/85 via-black/50 to-transparent p-5 pt-12 text-white">
+              <p className="font-mono text-xs text-white/85">{moodboard.style_archetype}</p>
+              <h4 className="mt-0.5 text-lg font-semibold leading-6">{moodboard.title}</h4>
             </div>
           </div>
 
-          <form onSubmit={handleRunMoodboardAgent} className="space-y-3">
+          <form onSubmit={handleRunMoodboardAgent} className="space-y-3" aria-busy={isAnalyzing}>
             <div className="flex items-center gap-2">
-              <label className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-stone-700 bg-stone-100 hover:bg-stone-200 rounded-xl cursor-pointer transition-colors whitespace-nowrap shrink-0">
-                <ImageIcon className="w-3.5 h-3.5" />
-                Upload Image
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleImageFileUpload}
-                  className="hidden"
-                />
+              <label className={cx('inline-flex h-10 shrink-0 cursor-pointer items-center gap-2 rounded-lg border border-stone-300 bg-white px-3 text-sm font-medium text-stone-900 transition-colors hover:border-stone-400 hover:bg-stone-50 focus-within:ring-2 focus-within:ring-[#4A6B53] focus-within:ring-offset-2')}>
+                <ImageIcon aria-hidden="true" className="h-4 w-4" />
+                Upload image
+                <input type="file" accept="image/*" onChange={handleImageFileUpload} className="sr-only" />
               </label>
-              <input
-                type="text"
-                placeholder="Or describe vibe (e.g., Kyoto Autumn Candlelight)..."
-                value={visionPrompt}
-                onChange={(e) => setVisionPrompt(e.target.value)}
-                className="w-full px-3.5 py-2 text-xs border border-stone-200 rounded-xl"
-              />
+              <input type="text" maxLength={200} aria-label="Describe the vibe" placeholder="Or describe the vibe, e.g. Kyoto autumn candlelight" value={visionPrompt} onChange={(e) => setVisionPrompt(e.target.value)} className={inputCls} />
             </div>
-            <button
-              type="submit"
-              disabled={isAnalyzing}
-              className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-2xl transition-colors"
-            >
+            <Button type="submit" variant="primary" disabled={isAnalyzing} className="w-full">
               {isAnalyzing ? (
                 <>
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  Extracting Palette &amp; Decor...
+                  <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin motion-reduce:animate-none" /> Extracting palette & decor…
                 </>
               ) : (
-                'Generate Palette & Decor Ideas'
+                'Generate palette & decor ideas'
               )}
-            </button>
-            {moodboardError && (
-              <p role="alert" className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2">
-                {moodboardError}
-              </p>
-            )}
+            </Button>
+            {moodboardError && <Notice kind="error">{moodboardError}</Notice>}
           </form>
-        </div>
+        </Card>
 
-        {/* Right 7 cols: Extracted Swatches, Decor, Floral & Culinary Matrix */}
-        <div className="lg:col-span-7 bg-white border border-stone-200/80 rounded-3xl p-7 sm:p-8 flex flex-col justify-between space-y-6 shadow-sm hover:shadow-md transition-shadow duration-200">
+        <Card aria-labelledby="mood-palette" className="flex flex-col justify-between gap-6 p-6 2xl:col-span-7">
           <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-stone-900">
-                Event Color Palette (Click Hex to Copy)
+            <div className="flex items-center justify-between gap-3">
+              <h3 id="mood-palette" className="flex items-center gap-2 text-base font-semibold leading-6 text-stone-900">
+                <Palette aria-hidden="true" className="h-4 w-4" /> Colour palette
               </h3>
-              <span className="text-xs text-stone-500 font-mono">
-                {moodboard.color_Swatches.length} Swatches
-              </span>
+              <span className="text-sm text-stone-600">Select a swatch to copy its hex</span>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-              {moodboard.color_Swatches.map((swatch) => (
-                <button
-                  key={swatch.hex}
-                  type="button"
-                  onClick={() => handleCopyHex(swatch.hex)}
-                  className="text-left group border border-stone-200/80 rounded-2xl overflow-hidden hover:border-stone-400 transition-colors"
-                >
-                  <div
-                    className="h-14 w-full"
-                    style={{ backgroundColor: swatch.hex }}
-                  />
-                  <div className="p-2.5 space-y-0.5 bg-white">
-                    <div className="flex items-center justify-between font-mono text-xs font-semibold text-stone-900">
-                      <span>{swatch.hex}</span>
-                      {copiedHex === swatch.hex ? (
-                        <Check className="w-3 h-3 text-emerald-600" />
-                      ) : (
-                        <Copy className="w-3 h-3 text-stone-400 opacity-0 group-hover:opacity-100 transition-opacity" />
-                      )}
-                    </div>
-                    <div className="text-xs font-medium text-stone-800 truncate">
-                      {swatch.name}
-                    </div>
-                    <div className="text-[11px] text-stone-500 truncate">
-                      {swatch.usage}
-                    </div>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5 pt-5 border-t border-stone-100 text-xs">
-            <div className="space-y-2">
-              <h4 className="font-semibold text-stone-900">Scenography &amp; Decor</h4>
-              <ul className="space-y-1.5 text-stone-600">
-                {moodboard.decor_elements.map((item, i) => (
-                  <li key={i}>· {item}</li>
-                ))}
-              </ul>
-            </div>
-            <div className="space-y-2">
-              <h4 className="font-semibold text-stone-900">Botanical &amp; Lighting</h4>
-              <p className="text-stone-600">{moodboard.lighting_atmosphere}</p>
-              <ul className="space-y-1 text-stone-600 pt-1">
-                {moodboard.floral_botanical_notes.map((item, i) => (
-                  <li key={i}>· {item}</li>
-                ))}
-              </ul>
-            </div>
-            <div className="space-y-2">
-              <h4 className="font-semibold text-stone-900">Culinary &amp; Dietary</h4>
-              <ul className="space-y-1.5 text-stone-600">
-                {moodboard.culinary_dietary_pairings.map((item, i) => (
-                  <li key={i}>· {item}</li>
-                ))}
-              </ul>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Section 4: Collaborator RBAC & Immutable Audit Log Trail */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
-        <div className="lg:col-span-5 bg-white border border-stone-200/80 rounded-3xl p-7 sm:p-8 space-y-4 shadow-sm hover:shadow-md transition-shadow duration-200">
-          <div>
-            <h3 className="text-sm font-bold text-stone-900">
-              Event Team &amp; Collaborators
-            </h3>
-            <p className="text-xs text-stone-500">
-              Role-based access permissions for this event
-            </p>
-          </div>
-          <div className="divide-y divide-stone-100 text-xs">
-            {collaborators.map((col) => (
-              <div key={col.id} className="py-3 flex items-center justify-between">
-                <div>
-                  <div className="font-medium text-stone-900">{col.name}</div>
-                  <div className="text-stone-500">{col.email}</div>
-                </div>
-                <span className="font-mono uppercase text-[11px] font-semibold text-stone-700">
-                  {col.role}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="lg:col-span-7 bg-white border border-stone-200/80 rounded-3xl p-7 sm:p-8 space-y-4 shadow-sm hover:shadow-md transition-shadow duration-200">
-          <div>
-            <h3 className="text-sm font-bold text-stone-900 flex items-center gap-2">
-              <History className="w-4 h-4 text-indigo-600" />
-              Recent Activity Log
-            </h3>
-            <p className="text-xs text-stone-500">
-              Every budget update, schedule shift, and Google Calendar RSVP sync is recorded
-            </p>
-          </div>
-          <div className="divide-y divide-stone-100 text-xs max-h-60 overflow-y-auto">
-            {auditLogs.map((log) => (
-              <div key={log.id} className="py-2.5 flex items-start justify-between gap-4">
-                <div>
-                  <div className="font-medium text-stone-900">{log.action}</div>
-                  <div className="text-[11px] text-stone-500">
-                    <span>{log.actor_name}</span>
-                    <span aria-hidden="true"> · </span>
-                    <span className="font-mono">{log.module}</span>
-                  </div>
-                </div>
-                <span className="font-mono text-[11px] text-stone-400 whitespace-nowrap shrink-0 tabular-nums">
-                  {new Date(log.timestamp).toLocaleTimeString([], {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* MANDATORY USER CONFIRMATION MODAL FOR SENDING GOOGLE CALENDAR INVITES */}
-      {isConfirmInviteModalOpen && (
-        <div className="fixed inset-0 z-50 bg-stone-950/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white border border-stone-200 rounded-3xl max-w-lg w-full p-7 shadow-xl space-y-5">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <span className="text-xs font-semibold text-indigo-600">
-                  Confirm Google Calendar Action
-                </span>
-                <h3 className="text-lg font-bold text-stone-900 mt-0.5">
-                  {event.google_calendar_event_id
-                    ? 'Update Calendar Event & Resend RSVP Invitations?'
-                    : 'Create Google Calendar Event & Email RSVP Invitations?'}
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsConfirmInviteModalOpen(false)}
-                className="p-1.5 text-stone-400 hover:text-stone-700 rounded-xl"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="space-y-3 text-xs text-stone-600 leading-relaxed">
-              <p>
-                This will {event.google_calendar_event_id ? 'update' : 'create'}{' '}
-                <strong className="text-stone-900">{event.title}</strong> on{' '}
-                <strong className="font-mono text-stone-900">{event.date}</strong> at{' '}
-                <strong className="text-stone-900">{event.location}</strong> in your primary Google Calendar and send email invitations to{' '}
-                <strong className="font-mono text-stone-900">
-                  {validEmailGuests.length} guest household(s)
-                </strong>
-                :
-              </p>
-
-              <div className="max-h-40 overflow-y-auto divide-y divide-stone-100 border-t border-b border-stone-100 py-1">
-                {validEmailGuests.map((g) => (
-                  <div
-                    key={g.id}
-                    className="py-2 flex items-center justify-between gap-3"
+            <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
+              {moodboard.color_Swatches.map((swatch, i) => (
+                <li key={`${swatch.hex}-${i}`}>
+                  <button
+                    type="button"
+                    onClick={() => handleCopyHex(swatch.hex)}
+                    aria-label={`Copy ${swatch.name} ${swatch.hex}`}
+                    className={cx('group w-full overflow-hidden rounded-xl border border-stone-200 text-left transition-[border-color,box-shadow] hover:border-stone-400 hover:shadow-md motion-reduce:transition-none', focusRing)}
                   >
-                    <span className="font-medium text-stone-800 truncate">
-                      {g.guest_name} (Party of {g.party_size})
+                    <span aria-hidden="true" className="block h-14 w-full" style={{ backgroundColor: HEX_RE.test(swatch.hex) ? swatch.hex : 'transparent' }} />
+                    <span className="block space-y-0.5 bg-white p-2.5">
+                      <span className="flex items-center justify-between font-mono text-xs font-semibold text-stone-900">
+                        {swatch.hex}
+                        {copiedHex === swatch.hex ? <Check aria-hidden="true" className="h-3.5 w-3.5 text-[#3B5943] dark:text-emerald-300" /> : <Copy aria-hidden="true" className="h-3.5 w-3.5 text-stone-500 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" />}
+                      </span>
+                      <span className="block truncate text-xs font-medium text-stone-800">{swatch.name}</span>
+                      <span className="block truncate text-xs text-stone-600">{swatch.usage}</span>
                     </span>
-                    <span className="font-mono text-[11px] text-stone-500 shrink-0">
-                      {g.contact}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <p role="status" className="sr-only">{copiedHex ? `Copied ${copiedHex}` : ''}</p>
+          </div>
 
-            <div className="flex items-center justify-end gap-2.5 pt-2">
-              <button
-                type="button"
-                onClick={() => setIsConfirmInviteModalOpen(false)}
-                disabled={isSendingInvites}
-                className="px-4 py-2.5 text-xs font-semibold text-stone-600 hover:text-stone-900 rounded-xl"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmAndSendInvites}
-                disabled={isSendingInvites}
-                className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 rounded-2xl transition-colors"
-              >
-                {isSendingInvites ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    Sending Invites...
-                  </>
-                ) : (
-                  <>
-                    <Send className="w-3.5 h-3.5" />
-                    Confirm &amp; Send Calendar Invites
-                  </>
-                )}
-              </button>
+          <div className="grid grid-cols-1 gap-5 border-t border-stone-100 pt-5 text-sm leading-5 2xl:grid-cols-3">
+            <div className="space-y-2">
+              <h4 className="font-semibold text-stone-900">Scenography & decor</h4>
+              <ul className="list-disc space-y-1.5 pl-4 text-stone-600">{moodboard.decor_elements.map((item, i) => <li key={i}>{item}</li>)}</ul>
+            </div>
+            <div className="space-y-2">
+              <h4 className="font-semibold text-stone-900">Botanical & lighting</h4>
+              <p className="text-stone-600">{moodboard.lighting_atmosphere}</p>
+              <ul className="list-disc space-y-1 pl-4 text-stone-600">{moodboard.floral_botanical_notes.map((item, i) => <li key={i}>{item}</li>)}</ul>
+            </div>
+            <div className="space-y-2">
+              <h4 className="font-semibold text-stone-900">Culinary & dietary</h4>
+              <ul className="list-disc space-y-1.5 pl-4 text-stone-600">{moodboard.culinary_dietary_pairings.map((item, i) => <li key={i}>{item}</li>)}</ul>
             </div>
           </div>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-1 items-stretch gap-6 2xl:grid-cols-12">
+        <Card aria-labelledby="team" className="space-y-4 p-6 2xl:col-span-5">
+          <CardHeader id="team" eyebrow="Access" title="Event team & collaborators" />
+          {collaborators.length === 0 ? (
+            <EmptyState icon={<Users className="h-5 w-5" />} title="Just you for now" body="Collaborators added to this event will appear here with their roles." />
+          ) : (
+            <ul className="divide-y divide-stone-100 text-sm">
+              {collaborators.map((col) => (
+                <li key={col.id} className="flex items-center justify-between gap-3 py-3">
+                  <div className="min-w-0">
+                    <p className="truncate font-medium text-stone-900">{col.name}</p>
+                    <p className="truncate text-stone-600">{col.email}</p>
+                  </div>
+                  <Badge>{col.role}</Badge>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+
+        <Card aria-labelledby="activity" className="space-y-4 p-6 2xl:col-span-7">
+          <CardHeader id="activity" eyebrow="History" title="Recent activity" />
+          {auditLogs.length === 0 ? (
+            <EmptyState icon={<History className="h-5 w-5" />} title="No activity yet" body="Budget updates, schedule shifts and RSVP syncs are recorded here." />
+          ) : (
+            <ul className="max-h-60 divide-y divide-stone-100 overflow-y-auto text-sm" tabIndex={0} aria-label="Activity log">
+              {auditLogs.map((log) => (
+                <li key={log.id} className="flex items-start justify-between gap-4 py-2.5">
+                  <div className="min-w-0">
+                    <p className="font-medium text-stone-900">{log.action}</p>
+                    <p className="text-xs text-stone-600">
+                      {log.actor_name} <span aria-hidden="true">·</span> <span className="font-mono">{log.module}</span>
+                    </p>
+                  </div>
+                  <time dateTime={log.timestamp} className="shrink-0 whitespace-nowrap font-mono text-xs tabular-nums text-stone-600">
+                    {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </time>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      </div>
+
+      <Modal
+        open={isConfirmInviteModalOpen}
+        onClose={() => setIsConfirmInviteModalOpen(false)}
+        locked={isSendingInvites}
+        eyebrow="Confirm Google Calendar action"
+        title={event.google_calendar_event_id ? 'Update calendar event & resend RSVP invitations?' : 'Create calendar event & email RSVP invitations?'}
+        footer={
+          <>
+            <Button data-autofocus onClick={() => setIsConfirmInviteModalOpen(false)} disabled={isSendingInvites}>
+              Cancel
+            </Button>
+            <Button variant="primary" onClick={handleConfirmAndSendInvites} disabled={isSendingInvites} aria-busy={isSendingInvites}>
+              {isSendingInvites ? (
+                <>
+                  <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin motion-reduce:animate-none" /> Sending invites…
+                </>
+              ) : (
+                <>
+                  <Send aria-hidden="true" className="h-4 w-4" /> Confirm & send invites
+                </>
+              )}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <p>
+            This will {event.google_calendar_event_id ? 'update' : 'create'} <strong className="text-stone-900">{event.title}</strong> on{' '}
+            <strong className="font-mono text-stone-900">{event.date}</strong> at <strong className="text-stone-900">{event.location}</strong> in your primary Google Calendar and email invitations to{' '}
+            <strong className="font-mono text-stone-900">{validEmailGuests.length} household(s)</strong>:
+          </p>
+          <ul className="max-h-40 divide-y divide-stone-100 overflow-y-auto border-y border-stone-100 py-1">
+            {validEmailGuests.map((g) => (
+              <li key={g.id} className="flex items-center justify-between gap-3 py-2">
+                <span className="truncate font-medium text-stone-800">{g.guest_name} (party of {g.party_size})</span>
+                <span className="shrink-0 font-mono text-xs text-stone-600">{g.contact}</span>
+              </li>
+            ))}
+          </ul>
         </div>
-      )}
+      </Modal>
     </div>
   );
 };

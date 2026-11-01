@@ -273,3 +273,157 @@ export function Field({ label, hint, children, className }: { label: string; hin
     </label>
   );
 }
+
+/* ------------------------------------------------------------------ Modal */
+
+const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+
+/**
+ * Focus management shared by every dialog: moves focus in on open ([data-autofocus] first), traps Tab,
+ * closes on Escape (unless locked), locks page scroll and restores focus on close.
+ */
+export function useDialogFocus(open: boolean, panel: React.RefObject<HTMLElement | null>, onClose: () => void, locked = false) {
+  const onCloseRef = React.useRef(onClose);
+  const lockedRef = React.useRef(locked);
+  onCloseRef.current = onClose;
+  lockedRef.current = locked;
+
+  React.useEffect(() => {
+    if (!open) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const root = panel.current;
+    const first = root?.querySelector<HTMLElement>('[data-autofocus]') ?? root?.querySelector<HTMLElement>(FOCUSABLE);
+    (first ?? root)?.focus();
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !lockedRef.current) {
+        e.stopPropagation();
+        onCloseRef.current();
+        return;
+      }
+      if (e.key !== 'Tab' || !panel.current) return;
+      const nodes = Array.from(panel.current.querySelectorAll<HTMLElement>(FOCUSABLE));
+      if (nodes.length === 0) {
+        e.preventDefault();
+        return;
+      }
+      const firstEl = nodes[0];
+      const lastEl = nodes[nodes.length - 1];
+      if (e.shiftKey && document.activeElement === firstEl) {
+        e.preventDefault();
+        lastEl.focus();
+      } else if (!e.shiftKey && document.activeElement === lastEl) {
+        e.preventDefault();
+        firstEl.focus();
+      }
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => {
+      document.removeEventListener('keydown', onKey, true);
+      document.body.style.overflow = prevOverflow;
+      previous?.focus?.();
+    };
+  }, [open, panel]);
+}
+
+/** Accessible modal dialog: role="dialog" + aria-modal, labelled by its title, plus useDialogFocus. */
+export function Modal({
+  open,
+  onClose,
+  title,
+  eyebrow,
+  locked = false,
+  children,
+  footer,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  eyebrow?: string;
+  /** While true (e.g. a request is in flight) Escape/backdrop/close do nothing. */
+  locked?: boolean;
+  children: React.ReactNode;
+  footer?: React.ReactNode;
+}) {
+  const panel = React.useRef<HTMLDivElement>(null);
+  const titleId = React.useId();
+  useDialogFocus(open, panel, onClose, locked);
+
+  if (!open) return null;
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-stone-950/60 p-4 backdrop-blur-sm"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget && !locked) onClose();
+      }}
+    >
+      <div
+        ref={panel}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        className="max-h-[90vh] w-full max-w-lg space-y-5 overflow-y-auto rounded-2xl border border-stone-200 bg-white p-6 shadow-[0_24px_64px_-16px_rgba(28,25,23,0.35)] outline-none"
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            {eyebrow && <p className="text-xs font-medium uppercase tracking-[0.08em] text-stone-600">{eyebrow}</p>}
+            <h3 id={titleId} className="mt-0.5 text-lg font-semibold leading-7 tracking-[-0.01em] text-stone-900">
+              {title}
+            </h3>
+          </div>
+          <button
+            type="button"
+            aria-label="Close dialog"
+            disabled={locked}
+            onClick={onClose}
+            className={cx('-m-2 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-stone-600 hover:bg-stone-100 hover:text-stone-900 disabled:opacity-50', focusRing)}
+          >
+            <svg aria-hidden="true" viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round">
+              <path d="M3 3l10 10M13 3L3 13" />
+            </svg>
+          </button>
+        </div>
+        <div className="text-sm leading-5 text-stone-600">{children}</div>
+        {footer && <div className="flex flex-wrap items-center justify-end gap-2">{footer}</div>}
+      </div>
+    </div>
+  );
+}
+
+/** Inline status/error message that is announced to assistive tech and dismissible. */
+export function Notice({
+  kind,
+  children,
+  onDismiss,
+}: {
+  kind: 'success' | 'error';
+  children: React.ReactNode;
+  onDismiss?: () => void;
+}) {
+  const ok = kind === 'success';
+  return (
+    <div
+      role={ok ? 'status' : 'alert'}
+      className={cx(
+        'flex items-start justify-between gap-3 rounded-xl border p-4 text-sm leading-5',
+        ok
+          ? 'border-[#C9DDCF] bg-[#EEF4EF] text-[#2F4A38] dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200'
+          : 'border-rose-200 bg-rose-50 text-rose-900 dark:border-rose-800 dark:bg-rose-950 dark:text-rose-200'
+      )}
+    >
+      <span>{children}</span>
+      {onDismiss && (
+        <button type="button" aria-label="Dismiss message" onClick={onDismiss} className={cx('-m-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg hover:bg-black/5', focusRing)}>
+          <svg aria-hidden="true" viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round">
+            <path d="M3 3l10 10M13 3L3 13" />
+          </svg>
+        </button>
+      )}
+    </div>
+  );
+}
+
+export const HEX_RE = /^#[0-9a-fA-F]{3,8}$/;
