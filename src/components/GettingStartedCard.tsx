@@ -61,7 +61,7 @@ export function GettingStartedCard({ steps }: { steps: StartStep[] }) {
                 <span className="block text-sm leading-5 text-stone-600">{s.hint}</span>
               </span>
               {!s.done && (
-                <span className="mt-0.5 inline-flex shrink-0 items-center gap-1 text-xs font-medium text-[#3B5943]">
+                <span className="mt-0.5 inline-flex shrink-0 items-center gap-1 text-xs font-medium text-[#3B5943] dark:text-emerald-300">
                   {s.actionLabel} <ArrowRight aria-hidden="true" className="h-3 w-3" />
                 </span>
               )}

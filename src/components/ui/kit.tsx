@@ -71,7 +71,7 @@ type Variant = 'primary' | 'secondary' | 'ghost';
 const variants: Record<Variant, string> = {
   primary: 'bg-[#3B5943] text-white hover:bg-[#314a38] active:bg-[#294031] shadow-sm',
   secondary: 'bg-white text-stone-900 border border-stone-300 hover:bg-stone-50 hover:border-stone-400 active:bg-stone-100',
-  ghost: 'text-[#3B5943] hover:bg-[#EEF4EF] active:bg-[#DFECE2]',
+  ghost: 'text-[#3B5943] dark:text-emerald-300 hover:bg-[#EEF4EF] active:bg-[#DFECE2]',
 };
 
 export function Button({
@@ -102,10 +102,10 @@ export function Button({
 
 type Tone = 'neutral' | 'good' | 'warn' | 'bad';
 const tones: Record<Tone, string> = {
-  neutral: 'bg-stone-100 text-stone-700 ring-stone-200',
-  good: 'bg-[#EEF4EF] text-[#2F4A38] ring-[#C9DDCF]',
-  warn: 'bg-amber-50 text-amber-900 ring-amber-200',
-  bad: 'bg-rose-50 text-rose-800 ring-rose-200',
+  neutral: 'bg-stone-100 text-stone-700 ring-stone-200 dark:bg-stone-800 dark:text-stone-200 dark:ring-stone-700',
+  good: 'bg-[#EEF4EF] text-[#2F4A38] ring-[#C9DDCF] dark:bg-emerald-950 dark:text-emerald-200 dark:ring-emerald-800',
+  warn: 'bg-amber-50 text-amber-900 ring-amber-200 dark:bg-amber-950 dark:text-amber-200 dark:ring-amber-800',
+  bad: 'bg-rose-50 text-rose-800 ring-rose-200 dark:bg-rose-950 dark:text-rose-200 dark:ring-rose-800',
 };
 
 export function Badge({ tone = 'neutral', children }: { tone?: Tone; children: React.ReactNode }) {
@@ -196,11 +196,11 @@ export function ErrorState({
   announce?: boolean;
 }) {
   return (
-    <div role={announce ? 'alert' : undefined} className="flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 p-4">
-      <AlertTriangle aria-hidden="true" className="h-5 w-5 shrink-0 text-rose-700 mt-0.5" />
+    <div role={announce ? 'alert' : undefined} className="flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 p-4 dark:border-rose-800 dark:bg-rose-950">
+      <AlertTriangle aria-hidden="true" className="h-5 w-5 shrink-0 text-rose-700 dark:text-rose-300 mt-0.5" />
       <div className="min-w-0 flex-1 space-y-1">
-        <p className="text-sm font-semibold text-rose-900 leading-5">{title}</p>
-        <p className="text-sm text-rose-800 leading-5">{body}</p>
+        <p className="text-sm font-semibold text-rose-900 dark:text-rose-100 leading-5">{title}</p>
+        <p className="text-sm text-rose-800 dark:text-rose-200 leading-5">{body}</p>
       </div>
       {onRetry && (
         <Button variant="secondary" onClick={onRetry} className="shrink-0 !h-8 !px-3">

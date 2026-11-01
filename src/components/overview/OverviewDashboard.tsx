@@ -86,10 +86,10 @@ function longDate(iso: string) {
 }
 
 const sev: Record<Insight['severity'], { icon: typeof Info; chip: string; label: string }> = {
-  critical: { icon: AlertOctagon, chip: 'bg-rose-50 text-rose-700 ring-rose-200', label: 'Critical' },
-  warning: { icon: AlertTriangle, chip: 'bg-amber-50 text-amber-800 ring-amber-200', label: 'Warning' },
-  info: { icon: Info, chip: 'bg-sky-50 text-sky-800 ring-sky-200', label: 'Info' },
-  success: { icon: CheckCircle2, chip: 'bg-[#EEF4EF] text-[#2F4A38] ring-[#C9DDCF]', label: 'Good' },
+  critical: { icon: AlertOctagon, chip: 'bg-rose-50 text-rose-700 ring-rose-200 dark:bg-rose-950 dark:text-rose-200 dark:ring-rose-800', label: 'Critical' },
+  warning: { icon: AlertTriangle, chip: 'bg-amber-50 text-amber-800 ring-amber-200 dark:bg-amber-950 dark:text-amber-200 dark:ring-amber-800', label: 'Warning' },
+  info: { icon: Info, chip: 'bg-sky-50 text-sky-800 ring-sky-200 dark:bg-sky-950 dark:text-sky-200 dark:ring-sky-800', label: 'Info' },
+  success: { icon: CheckCircle2, chip: 'bg-[#EEF4EF] text-[#2F4A38] ring-[#C9DDCF] dark:bg-emerald-950 dark:text-emerald-200 dark:ring-emerald-800', label: 'Good' },
 };
 
 function standing(score: number): { label: string; tone: 'good' | 'warn' | 'bad'; ring: string } {
@@ -213,7 +213,7 @@ function Kpi({
           <span aria-hidden="true">{icon}</span>
           {label}
         </span>
-        <span className="inline-flex items-center gap-1 text-xs font-medium text-[#3B5943] opacity-0 -translate-x-1 transition-[opacity,transform] group-hover:opacity-100 group-hover:translate-x-0 group-focus-visible:opacity-100 group-focus-visible:translate-x-0 motion-reduce:transition-none">
+        <span className="inline-flex items-center gap-1 text-xs font-medium text-[#3B5943] dark:text-emerald-300 opacity-0 -translate-x-1 transition-[opacity,transform] group-hover:opacity-100 group-hover:translate-x-0 group-focus-visible:opacity-100 group-focus-visible:translate-x-0 motion-reduce:transition-none">
           {cta} <ArrowRight aria-hidden="true" className="h-3 w-3" />
         </span>
       </span>
