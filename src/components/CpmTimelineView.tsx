@@ -1,12 +1,14 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ArrowRight,
   Calendar,
+  CalendarClock,
   Check,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
   Clock,
+  ListFilter,
   Plus,
   ShieldAlert,
   User,
@@ -17,6 +19,7 @@ import {
   CyclicDependencyError,
 } from '../lib/deterministicEngine';
 import { EventRecord, TaskRecord, TaskStatus } from '../types/domain';
+import { Badge, Button, Card, EmptyState, Field, PageHeader, ProgressBar, cx, focusRing, inputCls } from './ui/kit';
 
 interface CpmTimelineViewProps {
   event: EventRecord;
@@ -49,6 +52,15 @@ export const CpmTimelineView: React.FC<CpmTimelineViewProps> = ({
   const [newAssigned, setNewAssigned] = useState('Claire Vance');
   const [selectedDep, setSelectedDep] = useState<string>('');
 
+  // One banner timer at a time; cleared on unmount so a stale timeout never hides a newer message.
+  const bannerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (bannerTimer.current) clearTimeout(bannerTimer.current); }, []);
+  const flashBanner = (msg: string, ms: number) => {
+    if (bannerTimer.current) clearTimeout(bannerTimer.current);
+    setCascadeBanner(msg);
+    bannerTimer.current = setTimeout(() => setCascadeBanner(null), ms);
+  };
+
   const totalSpan = Math.max(30, cpmResult.totalProjectDurationDays);
 
   const handleShiftWithFeedback = (task: TaskRecord, deltaDays: number) => {
@@ -58,14 +70,14 @@ export const CpmTimelineView: React.FC<CpmTimelineViewProps> = ({
     ).length;
     const direction =
       deltaDays > 0 ? `delayed by +${deltaDays} days` : `moved ${Math.abs(deltaDays)} days earlier`;
-    setCascadeBanner(
+    flashBanner(
       `"${task.title}" was ${direction}. ${
         dependentCount > 0
           ? `Automatically shifted ${dependentCount} connected downstream task(s) to keep your schedule aligned.`
           : 'Schedule updated.'
       }`
+      , 5000
     );
-    setTimeout(() => setCascadeBanner(null), 5000);
   };
 
   const handleCreateTask = (e: React.FormEvent) => {
@@ -87,8 +99,7 @@ export const CpmTimelineView: React.FC<CpmTimelineViewProps> = ({
     if (created === false) return; // App already explained why (e.g. circular dependency)
     setNewTitle('');
     setShowNewTaskForm(false);
-    setCascadeBanner(`Scheduled new task "${newTitle.trim()}" and linked it to your timeline.`);
-    setTimeout(() => setCascadeBanner(null), 4000);
+    flashBanner(`Scheduled new task "${newTitle.trim()}" and linked it to your timeline.`, 4000);
   };
 
   const handleRunCycleGuardDemo = () => {
@@ -116,349 +127,251 @@ export const CpmTimelineView: React.FC<CpmTimelineViewProps> = ({
 
   const completedCount = cpmResult.tasks.filter((t) => t.status === 'completed').length;
 
+  const filters = [
+    ['ALL', `All (${cpmResult.tasks.length})`],
+    ['in_progress', 'In progress'],
+    ['todo', 'To do'],
+    ['delayed', 'Delayed'],
+    ['completed', `Done (${completedCount})`],
+  ] as const;
+
   return (
     <div className="space-y-6">
-      {/* Clean Header & Prominent "+ Schedule New Task" Action */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-stone-900">Event Schedule &amp; Timeline</h1>
-          <p className="text-sm text-stone-500 mt-0.5">
-            Check off tasks, add new milestones, or reschedule items — connected tasks adjust automatically.
-          </p>
-        </div>
+      <PageHeader
+        icon={<CalendarClock className="h-4 w-4" />}
+        eyebrow="Schedule"
+        title="Event schedule & timeline"
+        description="Check off tasks, add milestones or reschedule items. Connected tasks adjust automatically."
+        stat={{ value: `${completedCount}/${cpmResult.tasks.length}`, label: `done · ${cpmResult.totalProjectDurationDays}-day span` }}
+        actions={
+          <Button variant="primary" aria-expanded={showNewTaskForm} aria-controls="new-task-form" onClick={() => setShowNewTaskForm((prev) => !prev)}>
+            <Plus aria-hidden="true" className="h-4 w-4" />
+            {showNewTaskForm ? 'Close form' : 'Schedule new task'}
+          </Button>
+        }
+      >
+        <ProgressBar value={cpmResult.tasks.length ? (completedCount / cpmResult.tasks.length) * 100 : 0} label="Tasks completed" />
+      </PageHeader>
 
-        <button
-          type="button"
-          onClick={() => setShowNewTaskForm((prev) => !prev)}
-          className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition-colors shadow-2xs whitespace-nowrap shrink-0"
-        >
-          <Plus className="w-4 h-4" />
-          {showNewTaskForm ? 'Close Task Form' : 'Schedule New Task'}
-        </button>
+      <div role="status" aria-live="polite">
+        {cascadeBanner && (
+          <div className="flex items-center justify-between gap-4 rounded-xl border border-[#C9DDCF] bg-[#EEF4EF] p-4 text-sm text-[#2F4A38] dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">
+            <span className="flex items-center gap-3">
+              <CheckCircle2 aria-hidden="true" className="h-5 w-5 shrink-0" />
+              {cascadeBanner}
+            </span>
+            <Button variant="ghost" className="!h-8 shrink-0" onClick={() => setCascadeBanner(null)}>
+              Dismiss
+            </Button>
+          </div>
+        )}
       </div>
 
-      {/* Friendly Auto-Cascade Notification Banner */}
-      {cascadeBanner && (
-        <div className="p-4 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-950 flex items-center justify-between gap-4 text-xs font-medium">
-          <div className="flex items-center gap-2.5">
-            <CheckCircle2 className="w-4 h-4 text-indigo-600 shrink-0" />
-            <span>{cascadeBanner}</span>
-          </div>
-          <button
-            onClick={() => setCascadeBanner(null)}
-            className="text-indigo-600 hover:underline shrink-0"
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
-
-      {/* Clean Quick-Add Task Card */}
       {showNewTaskForm && (
-        <form
-          onSubmit={handleCreateTask}
-          className="bg-white border border-stone-200 rounded-2xl p-6 space-y-5 shadow-xs"
-        >
-          <div className="flex items-center justify-between border-b border-stone-100 pb-3">
-            <h2 className="text-base font-bold text-stone-900">Schedule a New Task</h2>
-            <span className="text-xs text-stone-500">
-              Dates are calculated automatically from your start date ({event.kickoff_date})
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-            <div className="lg:col-span-2">
-              <label className="block text-xs font-medium text-stone-700 mb-1.5">
-                What needs to be done?
-              </label>
-              <input
-                type="text"
-                required
-                placeholder="e.g., Finalize Cake Tasting or Send Save-the-Dates"
-                value={newTitle}
-                onChange={(e) => setNewTitle(e.target.value)}
-                className="w-full px-3.5 py-2 text-xs border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600"
-              />
+        <Card as="div" className="p-6">
+          <form id="new-task-form" onSubmit={handleCreateTask} className="space-y-5">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <h3 className="text-base font-semibold leading-6 text-stone-900">Schedule a new task</h3>
+              <p className="text-sm text-stone-600">Dates are calculated from your start date ({event.kickoff_date}).</p>
             </div>
-
-            <div>
-              <label className="block text-xs font-medium text-stone-700 mb-1.5">
-                Happens After (Optional)
-              </label>
-              <select
-                aria-label="Task that must finish first"
-                value={selectedDep}
-                onChange={(e) => setSelectedDep(e.target.value)}
-                className="w-full px-3 py-2 text-xs border border-stone-300 rounded-xl bg-white"
-              >
-                <option value="">Can start immediately</option>
-                {cpmResult.tasks.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    After: {t.title.slice(0, 30)}
-                  </option>
-                ))}
-              </select>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+              <Field label="What needs to be done?" className="lg:col-span-2">
+                <input
+                  type="text"
+                  required
+                  maxLength={120}
+                  autoFocus
+                  placeholder="e.g. Finalize cake tasting"
+                  value={newTitle}
+                  onChange={(e) => setNewTitle(e.target.value)}
+                  className={inputCls}
+                />
+              </Field>
+              <Field label="Happens after (optional)">
+                <select value={selectedDep} onChange={(e) => setSelectedDep(e.target.value)} className={inputCls}>
+                  <option value="">Can start immediately</option>
+                  {cpmResult.tasks.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      After: {t.title.slice(0, 30)}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Days to complete">
+                <input type="number" min={1} max={90} value={newDuration} onChange={(e) => setNewDuration(e.target.value)} className={cx(inputCls, 'font-mono tabular-nums')} />
+              </Field>
+              <Field label="Assigned to">
+                <input type="text" maxLength={60} value={newAssigned} onChange={(e) => setNewAssigned(e.target.value)} className={inputCls} />
+              </Field>
             </div>
-
-            <div>
-              <label className="block text-xs font-medium text-stone-700 mb-1.5">
-                How many days will it take?
-              </label>
-              <input
-                type="number"
-                min={1}
-                max={90}
-                value={newDuration}
-                onChange={(e) => setNewDuration(e.target.value)}
-                className="w-full px-3 py-2 text-xs font-mono border border-stone-300 rounded-xl"
-              />
+            <div className="flex items-center justify-end gap-2">
+              <Button onClick={() => setShowNewTaskForm(false)}>Cancel</Button>
+              <Button type="submit" variant="primary">
+                Add to schedule
+              </Button>
             </div>
-
-            <div>
-              <label className="block text-xs font-medium text-stone-700 mb-1.5">
-                Assigned To
-              </label>
-              <input
-                type="text"
-                value={newAssigned}
-                onChange={(e) => setNewAssigned(e.target.value)}
-                className="w-full px-3 py-2 text-xs border border-stone-300 rounded-xl"
-              />
-            </div>
-          </div>
-
-          <div className="flex items-center justify-end gap-3 pt-2">
-            <button
-              type="button"
-              onClick={() => setShowNewTaskForm(false)}
-              className="px-4 py-2 text-xs font-medium text-stone-600 bg-stone-100 hover:bg-stone-200 rounded-xl"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-5 py-2 text-xs font-semibold text-white bg-stone-900 hover:bg-stone-800 rounded-xl"
-            >
-              Add to Schedule
-            </button>
-          </div>
-        </form>
+          </form>
+        </Card>
       )}
 
-      {/* Filter Bar & Progress Summary */}
-      <div className="bg-white border border-stone-200/90 rounded-2xl p-4 sm:px-6 flex flex-wrap items-center justify-between gap-4 shadow-2xs">
-        <div className="flex items-center gap-1 p-1 bg-stone-100 rounded-xl">
-          {(
-            [
-              ['ALL', `All Tasks (${cpmResult.tasks.length})`],
-              ['in_progress', 'In Progress'],
-              ['todo', 'To Do'],
-              ['completed', `Completed (${completedCount})`],
-            ] as const
-          ).map(([st, label]) => (
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div role="group" aria-label="Filter tasks by status" className="flex max-w-full gap-1 overflow-x-auto rounded-xl bg-stone-100 p-1">
+          {filters.map(([st, label]) => (
             <button
               key={st}
+              type="button"
+              aria-pressed={statusFilter === st}
               onClick={() => setStatusFilter(st as 'ALL' | TaskStatus)}
-              className={`px-3.5 py-1.5 text-xs font-medium rounded-lg transition-all whitespace-nowrap ${
-                statusFilter === st
-                  ? 'bg-white text-stone-900 shadow-xs font-semibold'
-                  : 'text-stone-600 hover:text-stone-900'
-              }`}
+              className={cx(
+                'h-8 shrink-0 whitespace-nowrap rounded-lg px-3 text-sm font-medium transition-[background-color,box-shadow,color] motion-reduce:transition-none',
+                statusFilter === st ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-700 hover:text-stone-900',
+                focusRing
+              )}
             >
               {label}
             </button>
           ))}
         </div>
-
-        <div className="text-xs text-stone-500">
-          <span>Total Timeline Span: </span>
-          <strong className="font-mono text-stone-900">
-            {cpmResult.totalProjectDurationDays} days
-          </strong>
-          <span aria-hidden="true"> · </span>
-          <span>
-            {completedCount} of {cpmResult.tasks.length} tasks completed
-          </span>
-        </div>
+        <p className="text-sm text-stone-600" aria-live="polite">
+          Showing <span className="font-mono tabular-nums text-stone-900">{filteredTasks.length}</span> of {cpmResult.tasks.length}
+        </p>
       </div>
 
-      {/* Clean, Easy-to-Scan Task Cards */}
-      <div className="space-y-3">
-        {filteredTasks.map((task) => {
-          const isDone = task.status === 'completed';
-          const es = task.early_start ?? 0;
-          const ef = task.early_finish ?? es + task.duration_days;
-          const leftPct = Math.min(90, Math.round((es / totalSpan) * 100));
-          const widthPct = Math.max(
-            8,
-            Math.min(100 - leftPct, Math.round(((ef - es) / totalSpan) * 100))
-          );
+      {cpmResult.tasks.length === 0 ? (
+        <EmptyState
+          icon={<CalendarClock className="h-5 w-5" />}
+          title="No tasks yet"
+          body="Schedule your first task and we'll calculate dates and the critical path."
+          action={<Button variant="primary" onClick={() => setShowNewTaskForm(true)}>Schedule new task</Button>}
+        />
+      ) : filteredTasks.length === 0 ? (
+        <EmptyState
+          icon={<ListFilter className="h-5 w-5" />}
+          title="No tasks match this filter"
+          body="Try a different status to see the rest of your schedule."
+          action={<Button onClick={() => setStatusFilter('ALL')}>Show all tasks</Button>}
+        />
+      ) : (
+        <ul className="space-y-3">
+          {filteredTasks.map((task) => {
+            const isDone = task.status === 'completed';
+            const es = task.early_start ?? 0;
+            const ef = task.early_finish ?? es + task.duration_days;
+            const leftPct = Math.min(90, Math.round((es / totalSpan) * 100));
+            const widthPct = Math.max(8, Math.min(100 - leftPct, Math.round(((ef - es) / totalSpan) * 100)));
+            const depTitles = task.dependencies.map((depId) => cpmResult.tasks.find((t) => t.id === depId)?.title).filter(Boolean);
 
-          const depTitles = task.dependencies
-            .map((depId) => cpmResult.tasks.find((t) => t.id === depId)?.title)
-            .filter(Boolean);
-
-          return (
-            <div
-              key={task.id}
-              className={`bg-white border rounded-2xl p-5 transition-all shadow-2xs ${
-                isDone
-                  ? 'border-stone-200/70 bg-stone-50/40'
-                  : 'border-stone-200/90 hover:border-stone-300'
-              }`}
-            >
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-center">
-                {/* Left 5 cols: Checkbox + Title + Plain-English Details */}
-                <div className="lg:col-span-5 flex items-start gap-3.5">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      onToggleTaskStatus(task.id, isDone ? 'todo' : 'completed')
-                    }
-                    className={`mt-0.5 w-5 h-5 rounded-md border flex items-center justify-center transition-colors shrink-0 ${
-                      isDone
-                        ? 'bg-emerald-600 border-emerald-600 text-white'
-                        : 'border-stone-300 hover:border-indigo-600 bg-white'
-                    }`}
-                    title={isDone ? 'Mark as incomplete' : 'Mark as completed'}
-                  >
-                    {isDone && <Check className="w-3.5 h-3.5" />}
-                  </button>
-
-                  <div className="space-y-1 min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h3
-                        className={`text-sm font-semibold ${
-                          isDone ? 'line-through text-stone-400' : 'text-stone-900'
-                        }`}
-                      >
-                        {task.title}
-                      </h3>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-stone-500">
-                      <span>{task.category}</span>
-                      <span aria-hidden="true">·</span>
-                      <span className="inline-flex items-center gap-1">
-                        <User className="w-3 h-3 text-stone-400" />
-                        {task.assigned_to}
-                      </span>
-                      <span aria-hidden="true">·</span>
-                      <span className="inline-flex items-center gap-1 font-mono text-stone-700">
-                        <Calendar className="w-3 h-3 text-stone-400" />
-                        {task.start_date} <ArrowRight className="w-3 h-3 inline" /> {task.due_date}
-                      </span>
-                    </div>
-
-                    {depTitles.length > 0 && (
-                      <div className="text-xs text-stone-500 pt-0.5">
-                        Starts after: <span className="text-stone-700 font-medium">{depTitles.join(', ')}</span>
+            return (
+              <li key={task.id}>
+                <Card as="article" interactive className={cx('p-5', isDone && 'bg-stone-50')}>
+                  <div className="grid grid-cols-1 items-center gap-5 xl:grid-cols-12">
+                    <div className="flex items-start gap-3 xl:col-span-5">
+                      <label className="group -m-1.5 flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center">
+                        <input type="checkbox" className="peer sr-only" checked={isDone} onChange={() => onToggleTaskStatus(task.id, isDone ? 'todo' : 'completed')} />
+                        <span
+                          aria-hidden="true"
+                          className="flex h-5 w-5 items-center justify-center rounded-md border border-stone-400 bg-white text-white transition-colors group-hover:border-[#3B5943] peer-checked:border-[#3B5943] peer-checked:bg-[#3B5943] peer-focus-visible:ring-2 peer-focus-visible:ring-[#4A6B53] peer-focus-visible:ring-offset-2"
+                        >
+                          <Check className={cx('h-3.5 w-3.5 transition-opacity', isDone ? 'opacity-100' : 'opacity-0')} />
+                        </span>
+                        <span className="sr-only">{`Mark "${task.title}" as ${isDone ? 'not done' : 'done'}`}</span>
+                      </label>
+                      <div className="min-w-0 space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className={cx('text-sm font-semibold leading-5', isDone ? 'text-stone-500 line-through' : 'text-stone-900')}>{task.title}</h3>
+                          {task.is_critical_path && !isDone && <Badge tone="warn">Critical path</Badge>}
+                          {task.status === 'delayed' && <Badge tone="bad">Delayed</Badge>}
+                        </div>
+                        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm leading-5 text-stone-600">
+                          <span>{task.category}</span>
+                          <span aria-hidden="true">·</span>
+                          <span className="inline-flex items-center gap-1">
+                            <User aria-hidden="true" className="h-3.5 w-3.5" />
+                            {task.assigned_to}
+                          </span>
+                        </p>
+                        <p className="inline-flex items-center gap-1 font-mono text-xs tabular-nums text-stone-700">
+                          <Calendar aria-hidden="true" className="h-3.5 w-3.5" />
+                          {task.start_date} <ArrowRight aria-hidden="true" className="h-3 w-3" /> {task.due_date}
+                        </p>
+                        {depTitles.length > 0 && (
+                          <p className="text-sm leading-5 text-stone-600">
+                            Starts after <span className="font-medium text-stone-800">{depTitles.join(', ')}</span>
+                          </p>
+                        )}
                       </div>
-                    )}
-                  </div>
-                </div>
+                    </div>
 
-                {/* Middle 4 cols: Clean Visual Timeline Bar */}
-                <div className="lg:col-span-4 space-y-1">
-                  <div className="flex items-center justify-between text-[11px] text-stone-500">
-                    <span className="inline-flex items-center gap-1">
-                      <Clock className="w-3 h-3" /> {task.duration_days} days
-                    </span>
-                    <span className="font-mono">
-                      {task.is_critical_path ? 'Key Milestone' : `${task.slack_days ?? 0}d flexible buffer`}
-                    </span>
-                  </div>
-                  <div className="relative h-6 bg-stone-100 rounded-lg overflow-hidden">
-                    <div
-                      className={`absolute top-1 bottom-1 rounded-md transition-all duration-150 ${
-                        isDone
-                          ? 'bg-emerald-500'
-                          : task.is_critical_path
-                          ? 'bg-indigo-600'
-                          : 'bg-stone-400'
-                      }`}
-                      style={{
-                        left: `${leftPct}%`,
-                        width: `${widthPct}%`,
-                      }}
-                    />
-                  </div>
-                </div>
+                    <div className="space-y-1.5 xl:col-span-4">
+                      <div className="flex items-center justify-between text-xs text-stone-600">
+                        <span className="inline-flex items-center gap-1">
+                          <Clock aria-hidden="true" className="h-3.5 w-3.5" /> {task.duration_days} days
+                        </span>
+                        <span>{task.is_critical_path ? 'No buffer' : `${task.slack_days ?? 0}d buffer`}</span>
+                      </div>
+                      <div
+                        role="img"
+                        aria-label={`Runs from day ${es} to day ${ef} of ${totalSpan}`}
+                        className="relative h-6 overflow-hidden rounded-lg bg-stone-100"
+                      >
+                        <div
+                          className={cx(
+                            'absolute bottom-1 top-1 rounded-md transition-[left,width] duration-300 motion-reduce:transition-none',
+                            isDone ? 'bg-[#4A6B53]' : task.is_critical_path ? 'bg-amber-600' : 'bg-stone-500'
+                          )}
+                          style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+                        />
+                      </div>
+                    </div>
 
-                {/* Right 3 cols: Simple Reschedule Controls */}
-                <div className="lg:col-span-3 flex flex-wrap items-center justify-end gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => handleShiftWithFeedback(task, -3)}
-                    className="px-2.5 py-1.5 text-xs font-medium text-stone-700 bg-stone-100 hover:bg-stone-200 rounded-lg transition-colors whitespace-nowrap"
-                    title="Move task 3 days earlier"
-                  >
-                    3d Earlier
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleShiftWithFeedback(task, 7)}
-                    className="px-3 py-1.5 text-xs font-medium text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-200/80 rounded-lg transition-colors whitespace-nowrap"
-                    title="Delay by 1 week and auto-shift connected tasks"
-                  >
-                    Delay 1 Wk
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleShiftWithFeedback(task, 14)}
-                    className="px-3 py-1.5 text-xs font-medium text-rose-900 bg-rose-50 hover:bg-rose-100 border border-rose-200/80 rounded-lg transition-colors whitespace-nowrap"
-                    title="Delay by 2 weeks and auto-shift connected tasks"
-                  >
-                    Delay 2 Wks
-                  </button>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+                    <div className="flex flex-wrap items-center gap-2 xl:col-span-3 xl:justify-end">
+                      <Button className="!h-8 !px-3" onClick={() => handleShiftWithFeedback(task, -3)} aria-label={`3d earlier: ${task.title}`}>
+                        3d earlier
+                      </Button>
+                      <Button className="!h-8 !px-3" onClick={() => handleShiftWithFeedback(task, 7)} aria-label={`+1 wk: ${task.title}`}>
+                        +1 wk
+                      </Button>
+                      <Button className="!h-8 !px-3" onClick={() => handleShiftWithFeedback(task, 14)} aria-label={`+2 wks: ${task.title}`}>
+                        +2 wks
+                      </Button>
+                    </div>
+                  </div>
+                </Card>
+              </li>
+            );
+          })}
+        </ul>
+      )}
 
-      {/* Optional Progressive Disclosure for Advanced DAG / Cycle Guard */}
-      <div className="pt-2">
+      <div>
         <button
           type="button"
+          aria-expanded={showAdvancedDag}
+          aria-controls="dag-details"
           onClick={() => setShowAdvancedDag((prev) => !prev)}
-          className="inline-flex items-center gap-1.5 text-xs font-medium text-stone-500 hover:text-stone-800"
+          className={cx('inline-flex h-9 items-center gap-2 rounded-lg px-2 text-sm font-medium text-stone-700 hover:text-stone-900', focusRing)}
         >
-          {showAdvancedDag ? (
-            <>
-              <ChevronUp className="w-3.5 h-3.5" /> Hide Technical Critical Path (DAG) Details
-            </>
-          ) : (
-            <>
-              <ChevronDown className="w-3.5 h-3.5" /> Show Technical Critical Path (DAG) &amp; Loop Protection
-            </>
-          )}
+          {showAdvancedDag ? <ChevronUp aria-hidden="true" className="h-4 w-4" /> : <ChevronDown aria-hidden="true" className="h-4 w-4" />}
+          {showAdvancedDag ? 'Hide' : 'Show'} critical-path details
         </button>
-
         {showAdvancedDag && (
-          <div className="mt-3 p-4 bg-white border border-stone-200 rounded-2xl flex flex-wrap items-center justify-between gap-4 text-xs">
+          <Card as="div" className="mt-3 flex flex-wrap items-center justify-between gap-4 p-4" id="dag-details">
             <div className="space-y-1">
-              <div className="font-semibold text-stone-900">
-                Directed Acyclic Graph (DAG) Topological Sort &amp; Cycle Protection
-              </div>
-              <p className="text-stone-500">
-                Critical Path Milestones: {cpmResult.bottleneckCount} · Total Span:{' '}
-                {cpmResult.totalProjectDurationDays} days. Circular dependencies are automatically blocked.
+              <p className="text-sm font-semibold text-stone-900">Critical path & loop protection</p>
+              <p className="text-sm text-stone-600">
+                {cpmResult.bottleneckCount} critical milestones · {cpmResult.totalProjectDurationDays}-day span. Circular dependencies are blocked automatically.
               </p>
               {cycleTestAlert && (
-                <p className="text-emerald-700 font-mono pt-1">{cycleTestAlert}</p>
+                <p role="status" className="font-mono text-xs text-[#2F4A38] dark:text-emerald-300">
+                  {cycleTestAlert}
+                </p>
               )}
             </div>
-            <button
-              type="button"
-              onClick={handleRunCycleGuardDemo}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-stone-700 bg-stone-100 hover:bg-stone-200 rounded-xl whitespace-nowrap"
-            >
-              <ShieldAlert className="w-3.5 h-3.5 text-amber-600" />
-              Test Circular Dependency Protection
-            </button>
-          </div>
+            <Button onClick={handleRunCycleGuardDemo}>
+              <ShieldAlert aria-hidden="true" className="h-4 w-4 text-amber-700" />
+              Test loop protection
+            </Button>
+          </Card>
         )}
       </div>
     </div>

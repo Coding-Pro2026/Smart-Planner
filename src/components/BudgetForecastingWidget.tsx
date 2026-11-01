@@ -176,18 +176,18 @@ export const BudgetForecastingWidget: React.FC<BudgetForecastingWidgetProps> = (
   const targetYearIdx = chartPoints.findIndex((p) => p.year === targetYear);
 
   return (
-    <div className="bg-white border border-stone-200/80 rounded-3xl p-7 sm:p-8 space-y-8 shadow-sm hover:shadow-md transition-shadow duration-200">
+    <div className="bg-white border border-stone-200 rounded-2xl p-6 space-y-8 shadow-[0_1px_2px_rgba(28,25,23,0.04)] hover:shadow-[0_4px_16px_-4px_rgba(28,25,23,0.12)] transition-shadow motion-reduce:transition-none">
       {/* Clean Header & Year Horizon Picker */}
       <div className="flex flex-wrap items-start justify-between gap-6">
         <div className="space-y-1.5 max-w-2xl">
-          <div className="flex items-center gap-2 text-xs font-medium text-indigo-600">
+          <div className="flex items-center gap-2 text-xs font-medium text-[#3B5943] dark:text-emerald-300">
             <TrendingUp className="w-4 h-4" />
             <span>Year-over-Year Cost Forecast (Linear Regression)</span>
           </div>
-          <h2 className="text-xl font-bold text-stone-900">
+          <h2 className="text-xl font-semibold text-stone-900">
             How much will Catering &amp; Venue prices rise if you book later?
           </h2>
-          <p className="text-sm text-stone-500">
+          <p className="text-sm text-stone-600">
             Based on 5-year historical event pricing trends (2021–2026), here is what your current{' '}
             <span className="font-mono font-semibold text-stone-800">
               ${forecastReport.currentTotalBaseline.toLocaleString('en-US', { maximumFractionDigits: 0 })}
@@ -198,7 +198,7 @@ export const BudgetForecastingWidget: React.FC<BudgetForecastingWidgetProps> = (
         </div>
 
         <div className="flex flex-col items-start sm:items-end gap-2 max-w-full">
-          <span className="text-xs font-medium text-stone-500">Select Forecast Year</span>
+          <span className="text-xs font-medium text-stone-600">Select Forecast Year</span>
           <div className="flex flex-wrap items-center gap-1 p-1 bg-stone-100 rounded-2xl max-w-full">
             {[2027, 2028, 2029, 2030].map((yr) => (
               <button
@@ -222,42 +222,42 @@ export const BudgetForecastingWidget: React.FC<BudgetForecastingWidgetProps> = (
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-6 border-t border-stone-100">
         {/* Catering Column */}
         <div className="space-y-1.5">
-          <div className="flex items-center justify-between text-xs text-stone-500">
+          <div className="flex items-center justify-between text-xs text-stone-600">
             <span className="font-medium text-stone-700">Catering &amp; Beverage Trend</span>
             <span className="font-mono font-semibold text-amber-700">
               +{cateringForecast?.yoyIncreasePct ?? 0}% / year
             </span>
           </div>
           <div className="flex items-baseline gap-2 font-mono tabular-nums">
-            <span className="text-2xl font-bold text-stone-900">
+            <span className="text-2xl font-semibold text-stone-900">
               ${(cateringForecast?.projectedCost ?? 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}
             </span>
-            <span className="text-xs text-stone-400">
+            <span className="text-xs text-stone-600">
               in {targetYear} (vs ${(cateringForecast?.currentBaselineCost ?? 0).toLocaleString('en-US', { maximumFractionDigits: 0 })} today)
             </span>
           </div>
-          <p className="text-xs text-stone-500">
+          <p className="text-xs text-stone-600">
             Driven by culinary staffing &amp; specialty ingredient inflation.
           </p>
         </div>
 
         {/* Venue Column */}
         <div className="space-y-1.5 md:border-l md:border-stone-100 md:pl-6">
-          <div className="flex items-center justify-between text-xs text-stone-500">
+          <div className="flex items-center justify-between text-xs text-stone-600">
             <span className="font-medium text-stone-700">Venue &amp; Rentals Trend</span>
-            <span className="font-mono font-semibold text-indigo-600">
+            <span className="font-mono font-semibold text-[#3B5943] dark:text-emerald-300">
               +{venueForecast?.yoyIncreasePct ?? 0}% / year
             </span>
           </div>
           <div className="flex items-baseline gap-2 font-mono tabular-nums">
-            <span className="text-2xl font-bold text-stone-900">
+            <span className="text-2xl font-semibold text-stone-900">
               ${(venueForecast?.projectedCost ?? 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}
             </span>
-            <span className="text-xs text-stone-400">
+            <span className="text-xs text-stone-600">
               in {targetYear} (vs ${(venueForecast?.currentBaselineCost ?? 0).toLocaleString('en-US', { maximumFractionDigits: 0 })} today)
             </span>
           </div>
-          <p className="text-xs text-stone-500">
+          <p className="text-xs text-stone-600">
             Driven by prime weekend demand &amp; venue insurance rates.
           </p>
         </div>
@@ -271,11 +271,11 @@ export const BudgetForecastingWidget: React.FC<BudgetForecastingWidgetProps> = (
             <span className="font-mono font-semibold">Lock 2026 Rates</span>
           </div>
           <div className="flex items-baseline gap-2 font-mono tabular-nums">
-            <span className="text-2xl font-bold text-emerald-700">
+            <span className="text-2xl font-semibold text-emerald-700">
               Save ${forecastReport.totalEarlyLockInSavings.toLocaleString('en-US', { maximumFractionDigits: 0 })}
             </span>
           </div>
-          <p className="text-xs text-stone-500">
+          <p className="text-xs text-stone-600">
             Estimated savings by signing Venue &amp; Catering contracts at current rates.
           </p>
         </div>
@@ -292,7 +292,7 @@ export const BudgetForecastingWidget: React.FC<BudgetForecastingWidgetProps> = (
                   ? `${activeCategoryForecast.category} Cost Projection (2021–2030)`
                   : 'Total Event Cost Trajectory (2021–2030)'}
               </h3>
-              <p className="text-xs text-stone-500">
+              <p className="text-xs text-stone-600">
                 Solid dots show historical equivalents · Shaded band shows 95% confidence range
               </p>
             </div>
@@ -312,7 +312,7 @@ export const BudgetForecastingWidget: React.FC<BudgetForecastingWidgetProps> = (
             </select>
           </div>
 
-          <div className="border border-stone-200/80 rounded-xl bg-stone-50/40 p-4">
+          <div className="border border-stone-200 rounded-xl bg-stone-50/40 p-4">
             <svg
               viewBox={`0 0 ${svgWidth} ${svgHeight}`}
               className="w-full h-auto overflow-visible"
@@ -337,7 +337,7 @@ export const BudgetForecastingWidget: React.FC<BudgetForecastingWidgetProps> = (
                       x={padLeft - 10}
                       y={y + 4}
                       textAnchor="end"
-                      className="text-[11px] fill-stone-400 font-mono"
+                      className="text-xs fill-stone-400 font-mono"
                     >
                       ${Math.round(val / 1000)}k
                     </text>
@@ -359,7 +359,7 @@ export const BudgetForecastingWidget: React.FC<BudgetForecastingWidgetProps> = (
                   <text
                     x={getX(base2026Idx) + 6}
                     y={padTop + 12}
-                    className="text-[10px] fill-stone-500 font-medium"
+                    className="text-xs fill-stone-500 font-medium"
                   >
                     Today (2026) → Projected
                   </text>
@@ -412,11 +412,11 @@ export const BudgetForecastingWidget: React.FC<BudgetForecastingWidgetProps> = (
                       x={cx}
                       y={svgHeight - 10}
                       textAnchor="middle"
-                      className={`text-[11px] font-mono ${
+                      className={`text-xs font-mono ${
                         pt.year === targetYear
-                          ? 'fill-rose-600 font-bold'
+                          ? 'fill-rose-600 font-semibold'
                           : pt.isForecast
-                          ? 'fill-indigo-600 font-semibold'
+                          ? 'fill-[#3B5943] font-semibold'
                           : 'fill-stone-500'
                       }`}
                     >
@@ -462,7 +462,7 @@ export const BudgetForecastingWidget: React.FC<BudgetForecastingWidgetProps> = (
                 step={25}
                 value={macroShockBps}
                 onChange={(e) => setMacroShockBps(Number(e.target.value))}
-                className="w-full accent-indigo-600 cursor-pointer"
+                className="w-full accent-[#3B5943] cursor-pointer"
               />
             </div>
 
@@ -470,7 +470,7 @@ export const BudgetForecastingWidget: React.FC<BudgetForecastingWidgetProps> = (
               <button
                 type="button"
                 onClick={handleCommitEscalationBuffer}
-                className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-stone-900 hover:bg-stone-800 rounded-xl transition-colors whitespace-nowrap shrink-0"
+                className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium inline-flex items-center justify-center text-white bg-[#3B5943] hover:bg-[#314a38] rounded-xl transition-colors whitespace-nowrap shrink-0"
               >
                 {reserveCommitted ? (
                   <>
@@ -494,13 +494,13 @@ export const BudgetForecastingWidget: React.FC<BudgetForecastingWidgetProps> = (
             <h3 className="text-sm font-semibold text-stone-900">
               Projected Cost by Category ({targetYear})
             </h3>
-            <span className="text-xs text-stone-500">Click any row to filter chart</span>
+            <span className="text-xs text-stone-600">Click any row to filter chart</span>
           </div>
 
-          <div className="border border-stone-200/90 rounded-xl overflow-hidden">
+          <div className="border border-stone-200 rounded-xl overflow-hidden">
             <table className="w-full text-left border-collapse text-xs">
               <thead>
-                <tr className="bg-stone-50 border-b border-stone-200/80 text-stone-500 font-medium">
+                <tr className="bg-stone-50 border-b border-stone-200 text-stone-600 font-medium">
                   <th className="py-3 px-4">Category</th>
                   <th className="py-3 px-3 text-right">Today (2026)</th>
                   <th className="py-3 px-3 text-right">Annual Rise</th>
@@ -517,7 +517,7 @@ export const BudgetForecastingWidget: React.FC<BudgetForecastingWidgetProps> = (
                         setSelectedCategoryName(isSelected ? 'ALL' : cf.category)
                       }
                       className={`cursor-pointer transition-colors ${
-                        isSelected ? 'bg-indigo-50/70' : 'hover:bg-stone-50'
+                        isSelected ? 'bg-[#EEF4EF]' : 'hover:bg-stone-50'
                       }`}
                     >
                       <td className="py-3 px-4 font-medium text-stone-900">
@@ -530,10 +530,10 @@ export const BudgetForecastingWidget: React.FC<BudgetForecastingWidgetProps> = (
                         +{cf.yoyIncreasePct}%/yr
                       </td>
                       <td className="py-3 px-4 text-right font-mono tabular-nums">
-                        <div className="font-bold text-stone-900">
+                        <div className="font-semibold text-stone-900">
                           ${cf.projectedCost.toLocaleString('en-US', { maximumFractionDigits: 0 })}
                         </div>
-                        <div className="text-[11px] text-rose-600">
+                        <div className="text-xs text-rose-600">
                           +${cf.cumulativeDollarDelta.toLocaleString('en-US', { maximumFractionDigits: 0 })}
                         </div>
                       </td>
@@ -549,7 +549,7 @@ export const BudgetForecastingWidget: React.FC<BudgetForecastingWidgetProps> = (
             <button
               type="button"
               onClick={() => setShowAdvancedMath((prev) => !prev)}
-              className="w-full flex items-center justify-between px-4 py-2.5 text-xs font-medium text-stone-600 bg-stone-50 hover:bg-stone-100 border border-stone-200/80 rounded-xl transition-colors"
+              className="w-full flex items-center justify-between px-4 py-2.5 text-xs font-medium text-stone-600 bg-stone-50 hover:bg-stone-100 border border-stone-200 rounded-xl transition-colors"
             >
               <span>
                 {showAdvancedMath
@@ -576,13 +576,13 @@ export const BudgetForecastingWidget: React.FC<BudgetForecastingWidgetProps> = (
                         setMacroShockBps(0);
                         setCustomIndices({});
                       }}
-                      className="inline-flex items-center gap-1 text-indigo-600 hover:underline"
+                      className="inline-flex items-center gap-1 text-[#3B5943] dark:text-emerald-300 hover:underline"
                     >
                       <RotateCcw className="w-3 h-3" /> Reset Data
                     </button>
                   )}
                 </div>
-                <div className="space-y-1.5 font-mono text-[11px] text-stone-600">
+                <div className="space-y-1.5 font-mono text-xs text-stone-600">
                   {forecastReport.categoryForecasts.map((cf) => (
                     <div key={cf.category} className="flex items-center justify-between">
                       <span className="truncate max-w-[160px]">{cf.category}</span>
@@ -596,7 +596,7 @@ export const BudgetForecastingWidget: React.FC<BudgetForecastingWidgetProps> = (
 
                 {activeCategoryForecast && (
                   <div className="pt-2 border-t border-stone-200 space-y-2">
-                    <div className="text-[11px] font-medium text-stone-700">
+                    <div className="text-xs font-medium text-stone-700">
                       Calibrate {activeCategoryForecast.category} Price Index (2021=100):
                     </div>
                     <div className="grid grid-cols-6 gap-1.5">
@@ -604,10 +604,9 @@ export const BudgetForecastingWidget: React.FC<BudgetForecastingWidgetProps> = (
                         .filter((pt) => !pt.isForecast)
                         .map((pt) => (
                           <div key={pt.year} className="space-y-0.5">
-                            <label className="block text-[10px] font-mono text-stone-500 text-center">
-                              {pt.year}
-                            </label>
-                            <input
+                            <label className="block">
+<span className="block text-xs font-mono text-stone-600 text-center"> {pt.year}</span>
+<input
                               type="number"
                               step="0.5"
                               value={pt.indexValue}
@@ -618,8 +617,9 @@ export const BudgetForecastingWidget: React.FC<BudgetForecastingWidgetProps> = (
                                   Number(e.target.value)
                                 )
                               }
-                              className="w-full px-1 py-1 text-[11px] font-mono text-center bg-white border border-stone-300 rounded"
+                              className="w-full px-1 py-1 text-xs font-mono text-center bg-white border border-stone-300 rounded"
                             />
+</label>
                           </div>
                         ))}
                     </div>

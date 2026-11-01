@@ -1,13 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ArrowRight,
   Building2,
   ClipboardCheck,
   Lightbulb,
   Trash2,
   RotateCcw,
   Calendar,
-  Check,
   MapPin,
   MessageSquare,
   Moon,
@@ -17,7 +15,6 @@ import {
   ShieldCheck,
   Sparkles,
   Sun,
-  Users,
   X,
 } from 'lucide-react';
 import {
@@ -85,7 +82,6 @@ import { GettingStartedCard } from './components/GettingStartedCard';
 import { AnimatePresence, MotionConfig, motion } from 'motion/react';
 import { Backdrop } from './components/design/Backdrop';
 import { PageCurtain } from './components/design/PageCurtain';
-import { CountUp } from './components/design/primitives';
 import { LegalView } from './components/LegalView';
 import { AI_CONFIG_EVENT, AI_WARNING_EVENT, aiLabel, isAiConfigured, loadAiConfig } from './lib/aiConfig';
 import { KeyRound } from 'lucide-react';
@@ -1754,9 +1750,24 @@ export default function App() {
           </div>
 
           {/* EVENT TABS: one shared pill glides between tabs (layout animation) */}
-          <div className="pt-3 border-t border-stone-100 flex items-center gap-1.5 overflow-x-auto pb-1" role="tablist" aria-label="Event sections">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-stone-400 shrink-0 mr-1">
-              Event Tabs:
+          <div
+            className="pt-3 border-t border-stone-100 flex items-center gap-2 overflow-x-auto pb-1"
+            role="tablist"
+            aria-label="Event sections"
+            onKeyDown={(e) => {
+              const keys = ['ArrowRight', 'ArrowLeft', 'Home', 'End'];
+              if (!keys.includes(e.key)) return;
+              const tabs = Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
+              const cur = tabs.indexOf(document.activeElement as HTMLButtonElement);
+              if (cur < 0) return;
+              e.preventDefault();
+              const next = e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1 : (cur + (e.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+              tabs[next].focus();
+              tabs[next].scrollIntoView({ block: 'nearest', inline: 'nearest' });
+            }}
+          >
+            <span className="text-xs font-medium uppercase tracking-[0.08em] text-stone-600 shrink-0 mr-1">
+              Sections
             </span>
             {[
               { key: 'overview', label: 'Overview', active: activeTab === 'overview', onClick: () => setActiveTab('overview') },
@@ -1787,14 +1798,17 @@ export default function App() {
               { key: 'vendors', label: `Vendors (${eventVendors.length})`, active: activeTab === 'vendors', onClick: () => setActiveTab('vendors') },
               { key: 'checklist', label: 'Vendor Checklist', icon: <ClipboardCheck className="w-3.5 h-3.5" />, active: activeTab === 'checklist', onClick: () => setActiveTab('checklist') },
               { key: 'ideas', label: 'Idea Studio', icon: <Lightbulb className="w-3.5 h-3.5" />, active: activeTab === 'ideas', onClick: () => setActiveTab('ideas') },
-            ].map((t) => (
+            ].map((t, idx, all) => {
+              const activeIdx = Math.max(0, all.findIndex((x) => x.active));
+              return (
               <button
                 key={t.key}
                 type="button"
                 role="tab"
                 aria-selected={t.active}
+                tabIndex={idx === activeIdx ? 0 : -1}
                 onClick={t.onClick}
-                className={`relative inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-xl whitespace-nowrap shrink-0 transition-colors ${
+                className={`relative inline-flex items-center gap-2 h-9 px-4 text-sm font-medium rounded-xl whitespace-nowrap shrink-0 transition-colors motion-reduce:transition-none outline-none focus-visible:ring-2 focus-visible:ring-[#4A6B53] focus-visible:ring-offset-2 ${
                   t.active ? 'text-white' : (('tint' in t && t.tint) || 'bg-stone-100 text-stone-700') + ' hover:brightness-95'
                 }`}
               >
@@ -1805,12 +1819,13 @@ export default function App() {
                     transition={{ type: 'spring', stiffness: 420, damping: 34 }}
                   />
                 )}
-                <span className="relative z-10 inline-flex items-center gap-1.5">
+                <span className="relative z-10 inline-flex items-center gap-2">
                   {'icon' in t && t.icon}
                   {t.label}
                 </span>
               </button>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>
@@ -1852,7 +1867,7 @@ export default function App() {
               budget={budgetResult}
               tasks={cpmResult.tasks}
               scheduleError={cpmError}
-              onRetrySchedule={() => navigateTab('timeline')}
+              onFixSchedule={() => navigateTab('timeline')}
               rsvps={eventRsvps}
               confirmedGuests={confirmedRsvpGuests}
               vendors={eventVendors}

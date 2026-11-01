@@ -646,10 +646,9 @@ export const EntryModeAndAiIntakeView: React.FC<EntryModeAndAiIntakeViewProps> =
                 {/* Quick Editable Overrides */}
                 <div className="grid grid-cols-2 gap-3 pt-3 border-t border-stone-100 text-xs">
                   <div>
-                    <label className="block text-[11px] font-medium text-stone-500 mb-1">
-                      Event Name
-                    </label>
-                    <input
+                    <label className="block">
+<span className="block text-[11px] font-medium text-stone-500 mb-1">Event Name</span>
+<input
                       type="text"
                       value={blueprint.title}
                       onChange={(e) =>
@@ -657,12 +656,12 @@ export const EntryModeAndAiIntakeView: React.FC<EntryModeAndAiIntakeViewProps> =
                       }
                       className="w-full px-3 py-1.5 border border-stone-200 rounded-xl font-medium text-stone-900"
                     />
+</label>
                   </div>
                   <div>
-                    <label className="block text-[11px] font-medium text-stone-500 mb-1">
-                      Event Type
-                    </label>
-                    <input
+                    <label className="block">
+<span className="block text-[11px] font-medium text-stone-500 mb-1">Event Type</span>
+<input
                       type="text"
                       value={blueprint.event_type}
                       onChange={(e) =>
@@ -670,12 +669,12 @@ export const EntryModeAndAiIntakeView: React.FC<EntryModeAndAiIntakeViewProps> =
                       }
                       className="w-full px-3 py-1.5 border border-stone-200 rounded-xl font-medium text-stone-900"
                     />
+</label>
                   </div>
                   <div>
-                    <label className="block text-[11px] font-medium text-stone-500 mb-1">
-                      City / Location
-                    </label>
-                    <input
+                    <label className="block">
+<span className="block text-[11px] font-medium text-stone-500 mb-1">City / Location</span>
+<input
                       type="text"
                       value={blueprint.location}
                       onChange={(e) =>
@@ -683,13 +682,13 @@ export const EntryModeAndAiIntakeView: React.FC<EntryModeAndAiIntakeViewProps> =
                       }
                       className="w-full px-3 py-1.5 border border-stone-200 rounded-xl font-medium text-stone-900"
                     />
+</label>
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <label className="block text-[11px] font-medium text-stone-500 mb-1">
-                        Days
-                      </label>
-                      <input
+                      <label className="block">
+<span className="block text-[11px] font-medium text-stone-500 mb-1">Days</span>
+<input
                         type="number"
                         min={1}
                         max={14}
@@ -702,12 +701,12 @@ export const EntryModeAndAiIntakeView: React.FC<EntryModeAndAiIntakeViewProps> =
                         }
                         className="w-full px-2.5 py-1.5 border border-stone-200 rounded-xl font-mono text-stone-900"
                       />
+</label>
                     </div>
                     <div>
-                      <label className="block text-[11px] font-medium text-stone-500 mb-1">
-                        Budget ($)
-                      </label>
-                      <input
+                      <label className="block">
+<span className="block text-[11px] font-medium text-stone-500 mb-1">Budget ($)</span>
+<input
                         type="number"
                         min={500}
                         step={500}
@@ -720,6 +719,7 @@ export const EntryModeAndAiIntakeView: React.FC<EntryModeAndAiIntakeViewProps> =
                         }
                         className="w-full px-2.5 py-1.5 border border-stone-200 rounded-xl font-mono text-stone-900"
                       />
+</label>
                     </div>
                   </div>
                 </div>

@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useDialogFocus } from './ui/kit';
 import { CheckCircle2, ExternalLink, Eye, EyeOff, KeyRound, Loader2, RefreshCw, ShieldCheck, Trash2, X } from 'lucide-react';
 import { PROVIDERS, PROVIDER_IDS, ProviderId } from '../lib/llm/providers';
 import { StoredAiConfig, clearAiConfig, isAiConfigured, loadAiConfig, saveAiConfig } from '../lib/aiConfig';
@@ -39,10 +40,9 @@ export function AiSettingsModal({
     setCfg(loadAiConfig() ?? emptyFor('gemini'));
     setModels([]);
     setStatus(null);
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [isOpen, onClose]);
+  }, [isOpen]);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(isOpen, dialogRef, onClose);
 
   if (!isOpen) return null;
   const meta = PROVIDERS[cfg.provider];
@@ -115,21 +115,23 @@ export function AiSettingsModal({
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
     >
       <div
+        ref={dialogRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label="AI settings"
-        className="bg-white border border-stone-200 rounded-3xl max-w-2xl w-full max-h-[92vh] overflow-y-auto shadow-xl"
+        className="bg-white border border-stone-200 rounded-2xl max-w-2xl w-full max-h-[92vh] overflow-y-auto shadow-xl"
       >
         <div className="px-6 py-4 border-b border-stone-100 flex items-start justify-between gap-4">
           <div>
-            <h3 className="text-base font-bold text-stone-900 flex items-center gap-2">
+            <h3 className="text-base font-semibold text-stone-900 flex items-center gap-2">
               <KeyRound className="w-4 h-4 text-[#4A6B53]" /> Bring your own AI key
             </h3>
-            <p className="text-xs text-stone-500 mt-0.5">
+            <p className="text-xs text-stone-600 mt-0.5">
               Pick a provider, paste your key and choose a model. Everything works without a key too (built-in engine).
             </p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close" className="p-1 text-stone-400 hover:text-stone-700">
+          <button type="button" onClick={onClose} aria-label="Close" className="p-1 text-stone-600 hover:text-stone-700">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -153,7 +155,7 @@ export function AiSettingsModal({
               </button>
             ))}
           </div>
-          <p className="text-stone-500">{meta.blurb}</p>
+          <p className="text-stone-600">{meta.blurb}</p>
 
           {meta.needsBaseUrl && (
             <div className="space-y-1.5">
@@ -173,7 +175,7 @@ export function AiSettingsModal({
                   </button>
                 ))}
               </div>
-              <p className="text-[11px] text-stone-400">
+              <p className="text-xs text-stone-600">
                 Local servers (Ollama, LM Studio) only work when you run PlanGenie on your own machine with <code>ALLOW_PRIVATE_AI_URLS=true</code>.
               </p>
             </div>
@@ -182,7 +184,7 @@ export function AiSettingsModal({
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <label htmlFor="ai-key" className="block font-medium text-stone-700">
-                API key {!meta.needsKey && <span className="text-stone-400">(optional)</span>}
+                API key {!meta.needsKey && <span className="text-stone-600">(optional)</span>}
               </label>
               {meta.keyHelpUrl && (
                 <a href={meta.keyHelpUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-[#4A6B53] hover:underline">
@@ -201,7 +203,7 @@ export function AiSettingsModal({
                 spellCheck={false}
                 className="w-full pl-3.5 pr-10 py-2 border border-stone-300 rounded-xl font-mono"
               />
-              <button type="button" onClick={() => setShowKey((v) => !v)} aria-label={showKey ? 'Hide key' : 'Show key'} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-700">
+              <button type="button" onClick={() => setShowKey((v) => !v)} aria-label={showKey ? 'Hide key' : 'Show key'} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-600 hover:text-stone-700">
                 {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
@@ -254,7 +256,7 @@ export function AiSettingsModal({
             <input type="checkbox" checked={cfg.remember} onChange={(e) => set({ remember: e.target.checked })} className="mt-0.5" />
             <span>
               Remember on this device
-              <span className="block text-[11px] text-stone-400">
+              <span className="block text-xs text-stone-600">
                 Off (recommended on shared computers): the key is forgotten when you close the tab.
               </span>
             </span>
@@ -284,7 +286,7 @@ export function AiSettingsModal({
               <button type="button" onClick={test} disabled={!canCall || busy !== null} className="inline-flex items-center gap-1.5 px-4 py-2 font-semibold text-stone-800 bg-stone-100 hover:bg-stone-200 disabled:opacity-50 rounded-xl">
                 {busy === 'test' && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Test connection
               </button>
-              <button type="button" onClick={save} className="px-5 py-2 font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl">
+              <button type="button" onClick={save} className="px-5 py-2 font-semibold text-white bg-[#3B5943] hover:bg-[#314a38] rounded-xl">
                 Save
               </button>
             </div>

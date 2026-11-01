@@ -78,11 +78,11 @@ const VenueAdvancedMarkerWithInfo: React.FC<{
           onCloseClick={() => setInfoOpen(false)}
         >
           <div className="p-1 text-stone-900 space-y-1">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-[#8C6226]">
+            <div className="text-xs font-semibold uppercase tracking-wider text-[#8C6226]">
               Event Venue
             </div>
-            <div className="text-xs font-bold">{title}</div>
-            <div className="text-[11px] text-stone-600">{subtitle}</div>
+            <div className="text-xs font-semibold">{title}</div>
+            <div className="text-xs text-stone-600">{subtitle}</div>
           </div>
         </InfoWindow>
       )}
@@ -119,15 +119,15 @@ const HotelAdvancedMarkerWithInfo: React.FC<{
           onCloseClick={() => setInfoOpen(false)}
         >
           <div className="p-1 text-stone-900 space-y-1.5">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-[#4A6B53]">
+            <div className="text-xs font-semibold uppercase tracking-wider text-[#4A6B53]">
               Nearby Hotel (Places API New)
             </div>
-            <div className="text-xs font-bold">{place.displayName}</div>
-            <div className="text-[11px] text-stone-600">
+            <div className="text-xs font-semibold">{place.displayName}</div>
+            <div className="text-xs text-stone-600">
               {place.formattedAddress}
             </div>
             {typeof place.rating === 'number' && (
-              <div className="text-[11px] font-mono font-semibold text-amber-700">
+              <div className="text-xs font-mono font-semibold text-amber-700">
                 ★ {place.rating.toFixed(1)} rating
               </div>
             )}
@@ -135,7 +135,7 @@ const HotelAdvancedMarkerWithInfo: React.FC<{
               <button
                 type="button"
                 onClick={() => onCalculateRoute(place)}
-                className="px-2.5 py-1 text-[11px] font-semibold text-white bg-[#4A6B53] hover:bg-[#3A5642] rounded-lg transition-colors"
+                className="px-2.5 py-1 text-xs font-semibold text-white bg-[#4A6B53] hover:bg-[#3A5642] rounded-lg transition-colors"
               >
                 Compute Route to Venue
               </button>
@@ -144,7 +144,7 @@ const HotelAdvancedMarkerWithInfo: React.FC<{
                   href={safeHttpUrl(place.websiteURI) ?? '#'}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-[11px] font-semibold text-[#8C6226] hover:underline"
+                  className="text-xs font-semibold text-[#8C6226] hover:underline"
                 >
                   Website
                 </a>
@@ -427,7 +427,7 @@ const GoogleMapsSdkWorkspaceInner: React.FC<{
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               placeholder="Search venue or destination via Places API (New) Autocomplete..."
-              className="w-full text-xs bg-transparent text-stone-900 placeholder:text-stone-400 focus:outline-none"
+              className="w-full text-xs bg-transparent text-stone-900 placeholder:text-stone-600 focus:outline-none"
             />
             {isLoadingPlaces && (
               <Loader2 className="w-3.5 h-3.5 animate-spin text-[#4A6B53] shrink-0" />
@@ -445,7 +445,7 @@ const GoogleMapsSdkWorkspaceInner: React.FC<{
                   <span className="truncate font-medium">
                     {suggestion.placePrediction?.text.text}
                   </span>
-                  <span className="text-[10px] font-semibold text-[#4A6B53] shrink-0">
+                  <span className="text-xs font-semibold text-[#4A6B53] shrink-0">
                     Select Venue →
                   </span>
                 </li>
@@ -475,7 +475,7 @@ const GoogleMapsSdkWorkspaceInner: React.FC<{
       {/* Mandatory Sized Parent Container (CF2) + Map with DEMO_MAP_ID (CF9) and internalUsageAttributionIds */}
       <div
         style={{ height: '420px', width: '100%' }}
-        className="rounded-2xl overflow-hidden border border-stone-200/90 shadow-inner relative"
+        className="rounded-2xl overflow-hidden border border-stone-200 shadow-inner relative"
       >
         <Map
           mapId="DEMO_MAP_ID"
@@ -565,7 +565,7 @@ export const EventVenueAndHotelsMap: React.FC<EventVenueAndHotelsMapProps> = ({
   };
 
   return (
-    <div className="bg-white border border-stone-200/80 rounded-3xl p-7 sm:p-8 shadow-sm hover:shadow-md transition-shadow duration-200 space-y-6">
+    <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-[0_1px_2px_rgba(28,25,23,0.04)] hover:shadow-[0_4px_16px_-4px_rgba(28,25,23,0.12)] transition-shadow motion-reduce:transition-none space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="space-y-1.5 max-w-2xl">
           <div className="flex items-center gap-2 text-xs font-semibold text-[#4A6B53]">
@@ -574,11 +574,11 @@ export const EventVenueAndHotelsMap: React.FC<EventVenueAndHotelsMapProps> = ({
               Venue &amp; Guest Hotel Map
             </span>
           </div>
-          <h3 className="text-xl font-bold text-stone-900">
+          <h3 className="text-xl font-semibold text-stone-900">
             Interactive Venue &amp; Nearby Hotel Map —{' '}
             {event.location.split('—')[0].trim()}
           </h3>
-          <p className="text-xs text-stone-500 leading-relaxed">
+          <p className="text-xs text-stone-600 leading-relaxed">
             Explore your event venue and nearby guest hotels on OpenStreetMap, or bring your own Google Maps key for the interactive Google map.
           </p>
         </div>
@@ -591,7 +591,7 @@ export const EventVenueAndHotelsMap: React.FC<EventVenueAndHotelsMapProps> = ({
               setSelectedMapQuery(event.location);
               setPin(null);
             }}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-xl transition-colors ${
+            className={`h-9 px-4 text-sm font-medium inline-flex items-center justify-center rounded-xl transition-colors ${
               selectedMapQuery === event.location
                 ? 'bg-[#B88B4A] text-white'
                 : 'bg-[#FAF6EC] text-[#8C6226] hover:bg-[#F3E8D3]'
@@ -609,7 +609,7 @@ export const EventVenueAndHotelsMap: React.FC<EventVenueAndHotelsMapProps> = ({
                   prev === 'js_sdk' ? 'embed' : 'js_sdk'
                 )
               }
-              className="px-3 py-1.5 text-xs font-semibold rounded-xl bg-[#EDF3EE] text-[#4A6B53] hover:bg-[#DFECE1] transition-colors"
+              className="h-9 px-4 text-sm font-medium inline-flex items-center justify-center rounded-xl bg-[#EDF3EE] text-[#4A6B53] hover:bg-[#DFECE1] transition-colors"
             >
               {activeMapMode === 'js_sdk'
                 ? 'Switch to OpenStreetMap'
@@ -623,14 +623,14 @@ export const EventVenueAndHotelsMap: React.FC<EventVenueAndHotelsMapProps> = ({
             )}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-stone-700 bg-stone-100 hover:bg-stone-200 rounded-xl transition-colors"
+            className="inline-flex items-center gap-1.5 h-9 px-4 text-sm font-medium inline-flex items-center justify-center text-stone-700 bg-stone-100 hover:bg-stone-200 rounded-xl transition-colors"
           >
             Open in Google Maps <ExternalLink className="w-3 h-3" />
           </a>
         </div>
       </div>
 
-      <details className="text-xs text-stone-500">
+      <details className="text-xs text-stone-600">
         <summary className="cursor-pointer font-semibold text-stone-600">Use Google Maps with my own API key (optional)</summary>
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <input
@@ -641,7 +641,7 @@ export const EventVenueAndHotelsMap: React.FC<EventVenueAndHotelsMapProps> = ({
             placeholder={envApiKey ? 'Key saved — paste a new one or leave blank and Save to remove' : 'Maps JavaScript API key'}
             className="flex-1 min-w-[220px] px-3 py-2 border border-stone-300 rounded-xl font-mono"
           />
-          <button type="button" onClick={saveMapsKey} className="px-3.5 py-2 font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl">Save</button>
+          <button type="button" onClick={saveMapsKey} className="px-3.5 py-2 font-semibold text-white bg-[#3B5943] hover:bg-[#314a38] rounded-xl">Save</button>
         </div>
         {keyError && <p role="alert" className="mt-1 text-rose-700">{keyError}</p>}
         <p className="mt-1.5 leading-relaxed">
@@ -654,7 +654,7 @@ export const EventVenueAndHotelsMap: React.FC<EventVenueAndHotelsMapProps> = ({
       {/* Quick Filter Chips to Pin Any Discovered Nearby Hotel on the Map */}
       {liveHotelDeals.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 pt-1">
-          <span className="text-[11px] font-semibold uppercase tracking-wider text-stone-400 mr-1">
+          <span className="text-xs font-semibold uppercase tracking-wider text-stone-600 mr-1">
             Pin on Map:
           </span>
           <button
@@ -663,7 +663,7 @@ export const EventVenueAndHotelsMap: React.FC<EventVenueAndHotelsMapProps> = ({
               setSelectedMapQuery(event.location);
               setPin(null);
             }}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-xl border transition-colors ${
+            className={`h-9 px-4 text-sm font-medium inline-flex items-center justify-center rounded-xl border transition-colors ${
               selectedMapQuery === event.location
                 ? 'bg-stone-900 text-white border-stone-900'
                 : 'bg-stone-50 text-stone-700 border-stone-200 hover:bg-stone-100'
@@ -682,7 +682,7 @@ export const EventVenueAndHotelsMap: React.FC<EventVenueAndHotelsMapProps> = ({
                             setSelectedMapQuery(dealQuery);
                             setPin(typeof deal.lat === 'number' && typeof deal.lng === 'number' ? { lat: deal.lat, lng: deal.lng } : null);
                           }}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl border transition-colors ${
+                className={`inline-flex items-center gap-1.5 h-9 px-4 text-sm font-medium inline-flex items-center justify-center rounded-xl border transition-colors ${
                   isSelected
                     ? 'bg-[#4A6B53] text-white border-[#4A6B53]'
                     : 'bg-[#EDF3EE]/70 text-[#2E4635] border-[#4A6B53]/20 hover:bg-[#EDF3EE]'
@@ -691,7 +691,7 @@ export const EventVenueAndHotelsMap: React.FC<EventVenueAndHotelsMapProps> = ({
                 <Hotel className="w-3 h-3 shrink-0" />
                 <span>{deal.hotel_name}</span>
                 {deal.price_per_night > 0 && (
-                  <span className="font-mono text-[11px] opacity-85">
+                  <span className="font-mono text-xs opacity-85">
                     (${deal.price_per_night}/nt)
                   </span>
                 )}
@@ -716,7 +716,7 @@ export const EventVenueAndHotelsMap: React.FC<EventVenueAndHotelsMapProps> = ({
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
           <div
             style={{ height: '420px', width: '100%' }}
-            className="lg:col-span-8 rounded-2xl overflow-hidden border border-stone-200/90 shadow-inner bg-[#FAF6EC] relative"
+            className="lg:col-span-8 rounded-2xl overflow-hidden border border-stone-200 shadow-inner bg-[#FAF6EC] relative"
           >
             {point ? (
               <iframe
@@ -736,13 +736,13 @@ export const EventVenueAndHotelsMap: React.FC<EventVenueAndHotelsMapProps> = ({
             )}
           </div>
 
-          <div className="lg:col-span-4 flex flex-col justify-between gap-4 bg-[#FAF6EC]/80 border border-stone-200/80 rounded-2xl p-5">
+          <div className="lg:col-span-4 flex flex-col justify-between gap-4 bg-[#FAF6EC]/80 border border-stone-200 rounded-2xl p-5">
             <div className="space-y-3">
-              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#B88B4A]/15 text-[#8C6226] text-[11px] font-bold">
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#B88B4A]/15 text-[#8C6226] text-xs font-semibold">
                 <Sparkles className="w-3.5 h-3.5" />
                 Pinned Location Details
               </div>
-              <h4 className="text-base font-bold text-stone-900">
+              <h4 className="text-base font-semibold text-stone-900">
                 {selectedMapQuery}
               </h4>
               <p className="text-xs text-stone-600 leading-relaxed">
@@ -752,7 +752,7 @@ export const EventVenueAndHotelsMap: React.FC<EventVenueAndHotelsMapProps> = ({
               </p>
 
               <div className="pt-2 border-t border-stone-200/70 space-y-2">
-                <div className="text-[11px] font-semibold uppercase tracking-wider text-stone-400">
+                <div className="text-xs font-semibold uppercase tracking-wider text-stone-600">
                   Nearby Hotels ({liveHotelDeals.length})
                 </div>
                 <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
@@ -761,7 +761,7 @@ export const EventVenueAndHotelsMap: React.FC<EventVenueAndHotelsMapProps> = ({
                     return (
                       <div
                         key={deal.id}
-                        className="p-2.5 rounded-xl bg-white border border-stone-200/80 flex items-center justify-between gap-2 text-xs"
+                        className="p-2.5 rounded-xl bg-white border border-stone-200 flex items-center justify-between gap-2 text-xs"
                       >
                         <button
                           type="button"
@@ -771,17 +771,17 @@ export const EventVenueAndHotelsMap: React.FC<EventVenueAndHotelsMapProps> = ({
                           }}
                           className="text-left min-w-0 flex-1"
                         >
-                          <div className="font-bold text-stone-900 truncate">
+                          <div className="font-semibold text-stone-900 truncate">
                             {deal.hotel_name}
                           </div>
-                          <div className="text-[11px] text-stone-500 truncate">
+                          <div className="text-xs text-stone-600 truncate">
                             {deal.distance_from_venue}
                             {deal.star_rating > 0 ? ` · ${deal.star_rating.toFixed(0)}★` : ''}
                           </div>
                         </button>
                         <div className="text-right shrink-0 space-y-1">
                           {deal.price_per_night > 0 && (
-                            <div className="font-mono font-bold text-[#4A6B53]">
+                            <div className="font-mono font-semibold text-[#4A6B53]">
                               ${deal.price_per_night}/nt
                             </div>
                           )}
@@ -789,7 +789,7 @@ export const EventVenueAndHotelsMap: React.FC<EventVenueAndHotelsMapProps> = ({
                             <button
                               type="button"
                               onClick={() => onLockInHotelDeal(deal)}
-                              className="px-2 py-0.5 text-[10px] font-semibold text-white bg-[#B88B4A] hover:bg-[#9E7336] rounded-md transition-colors"
+                              className="px-2 py-0.5 text-xs font-semibold text-white bg-[#B88B4A] hover:bg-[#9E7336] rounded-md transition-colors"
                             >
                               + Block
                             </button>
@@ -802,7 +802,7 @@ export const EventVenueAndHotelsMap: React.FC<EventVenueAndHotelsMapProps> = ({
               </div>
             </div>
 
-            <div className="pt-3 border-t border-stone-200/70 text-[11px] text-stone-500 flex items-center justify-between gap-2">
+            <div className="pt-3 border-t border-stone-200/70 text-xs text-stone-600 flex items-center justify-between gap-2">
               <span>
                 Map ©{' '}
                 <a
