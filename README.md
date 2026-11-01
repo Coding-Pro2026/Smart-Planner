@@ -120,3 +120,7 @@ They are a template, not legal advice — have counsel review.
 - Client-supplied tenant headers are ignored unless `TRUST_TENANT_HEADER=true` behind an authenticating gateway.
 - Known limitation: there is no user authentication — plans are stored per-browser. Add auth before storing shared/multi-user data server-side.
 - CI runs `bun audit` (currently 0 vulnerabilities), typecheck, tests and build.
+
+## License
+
+[MIT](LICENSE) © 2026 Coding-Pro2026
