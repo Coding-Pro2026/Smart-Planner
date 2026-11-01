@@ -1,13 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ArrowRight,
   Building2,
   ClipboardCheck,
   Lightbulb,
   Trash2,
   RotateCcw,
   Calendar,
-  Check,
   MapPin,
   MessageSquare,
   Moon,
@@ -17,7 +15,6 @@ import {
   ShieldCheck,
   Sparkles,
   Sun,
-  Users,
   X,
 } from 'lucide-react';
 import {
@@ -85,7 +82,6 @@ import { GettingStartedCard } from './components/GettingStartedCard';
 import { AnimatePresence, MotionConfig, motion } from 'motion/react';
 import { Backdrop } from './components/design/Backdrop';
 import { PageCurtain } from './components/design/PageCurtain';
-import { CountUp } from './components/design/primitives';
 import { LegalView } from './components/LegalView';
 import { AI_CONFIG_EVENT, AI_WARNING_EVENT, aiLabel, isAiConfigured, loadAiConfig } from './lib/aiConfig';
 import { KeyRound } from 'lucide-react';
@@ -1852,7 +1848,7 @@ export default function App() {
               budget={budgetResult}
               tasks={cpmResult.tasks}
               scheduleError={cpmError}
-              onRetrySchedule={() => navigateTab('timeline')}
+              onFixSchedule={() => navigateTab('timeline')}
               rsvps={eventRsvps}
               confirmedGuests={confirmedRsvpGuests}
               vendors={eventVendors}

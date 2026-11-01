@@ -51,14 +51,17 @@ export interface OverviewDashboardProps {
   onNavigate: (tab: OverviewTab) => void;
   onToggleTask: (taskId: string, next: TaskStatus) => void;
   onOpenCustomModule: (moduleId: string) => void;
-  onRetrySchedule?: () => void;
+  /** Jump to the timeline so the user can fix a schedule error. */
+  onFixSchedule?: () => void;
   /** Optional first-run checklist; rendered under the hero when provided. */
   gettingStarted?: React.ReactNode;
-  /** Heavy widgets (map, forecast) are injected so they can be code-split. */
+  /** Heavy widgets (map, forecast) are rendered below the dashboard. */
   children?: React.ReactNode;
 }
 
 /* ------------------------------------------------------------- helpers */
+
+const HEX = /^#[0-9a-fA-F]{3,8}$/;
 
 function makeMoney(currency: string) {
   try {
@@ -99,6 +102,7 @@ function standing(score: number): { label: string; tone: 'good' | 'warn' | 'bad'
 
 function Hero({ p }: { p: OverviewDashboardProps }) {
   const s = standing(p.readiness.score);
+  const isBlank = p.tasks.length === 0 && p.budget.items.length === 0 && p.vendors.length === 0 && p.rsvps.length === 0;
   const C = 2 * Math.PI * 42;
   const countdown =
     p.daysToEvent > 0 ? `${p.daysToEvent} day${p.daysToEvent === 1 ? '' : 's'} to go` : p.daysToEvent === 0 ? 'Event day' : 'Event date passed';
@@ -108,7 +112,7 @@ function Hero({ p }: { p: OverviewDashboardProps }) {
       <div className="flex flex-col gap-8 lg:flex-row lg:items-center lg:justify-between">
         <div className="min-w-0 space-y-4">
           <div className="flex flex-wrap items-center gap-2">
-            <Badge tone={s.tone}>{s.label}</Badge>
+            <Badge tone={isBlank ? 'neutral' : s.tone}>{isBlank ? 'Just getting started' : s.label}</Badge>
             <Badge>{countdown}</Badge>
           </div>
           <h2 id="ov-hero-title" className="text-[28px] leading-9 sm:text-[32px] sm:leading-10 text-stone-900 text-balance">
@@ -145,7 +149,7 @@ function Hero({ p }: { p: OverviewDashboardProps }) {
                 strokeWidth="8"
                 strokeLinecap="round"
                 strokeDasharray={C}
-                strokeDashoffset={C * (1 - p.readiness.score / 100)}
+                strokeDashoffset={C * (1 - Math.max(0, Math.min(100, Number(p.readiness.score) || 0)) / 100)}
                 className="transition-[stroke-dashoffset] duration-700 ease-out motion-reduce:transition-none"
               />
             </svg>
@@ -234,6 +238,7 @@ function Attention({ p }: { p: OverviewDashboardProps }) {
           <ul className="-mx-2 divide-y divide-stone-100">
             {items.map((i) => {
               const { icon: Icon, chip, label } = sev[i.severity];
+              const tab = i.tab;
               const body = (
                 <>
                   <span className={cx('mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ring-1 ring-inset', chip)}>
@@ -244,15 +249,15 @@ function Attention({ p }: { p: OverviewDashboardProps }) {
                     <span className="block text-sm font-medium leading-5 text-stone-900">{i.title}</span>
                     <span className="block text-sm leading-5 text-stone-600">{i.detail}</span>
                   </span>
-                  {i.tab && <ArrowRight aria-hidden="true" className="mt-2 h-4 w-4 shrink-0 text-stone-500 transition-transform group-hover:translate-x-0.5 motion-reduce:transition-none" />}
+                  {tab && <ArrowRight aria-hidden="true" className="mt-2 h-4 w-4 shrink-0 text-stone-500 transition-transform group-hover:translate-x-0.5 motion-reduce:transition-none" />}
                 </>
               );
               return (
                 <li key={i.id}>
-                  {i.tab ? (
+                  {tab ? (
                     <button
                       type="button"
-                      onClick={() => p.onNavigate(i.tab as OverviewTab)}
+                      onClick={() => p.onNavigate(tab)}
                       className={cx('group flex w-full items-start gap-3 rounded-xl px-2 py-3 transition-colors hover:bg-stone-50 active:bg-stone-100', focusRing)}
                     >
                       {body}
@@ -309,10 +314,11 @@ function UpNext({ p }: { p: OverviewDashboardProps }) {
       <div className="mt-4">
         {p.scheduleError ? (
           <ErrorState
+            announce={false}
             title="Schedule couldn't be calculated"
-            body={`${p.scheduleError} Fix the circular dependency in the timeline, then retry.`}
-            onRetry={p.onRetrySchedule}
-            retryLabel="Open timeline"
+            body={`${p.scheduleError} Fix the circular dependency in the timeline.`}
+            onRetry={p.onFixSchedule ?? (() => p.onNavigate('timeline'))}
+            retryLabel="Fix in timeline"
           />
         ) : p.tasks.length === 0 ? (
           <EmptyState
@@ -588,10 +594,6 @@ export function OverviewDashboard(p: OverviewDashboardProps) {
         />
       </section>
 
-      <p className="sr-only" aria-live="polite">
-        {done} of {p.tasks.length} tasks complete.
-      </p>
-
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
         <Attention p={p} />
         <UpNext p={p} />
@@ -603,9 +605,9 @@ export function OverviewDashboard(p: OverviewDashboardProps) {
         <Card aria-labelledby="ov-palette" className="p-6">
           <CardHeader id="ov-palette" eyebrow="Look & feel" title={p.palette.title} />
           <ul className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
-            {p.palette.swatches.map((s) => (
-              <li key={s.hex} className="flex items-center gap-3">
-                <span aria-hidden="true" className="h-8 w-8 shrink-0 rounded-lg ring-1 ring-inset ring-stone-300" style={{ backgroundColor: s.hex }} />
+            {p.palette.swatches.map((s, i) => (
+              <li key={`${s.hex}-${i}`} className="flex items-center gap-3">
+                <span aria-hidden="true" className="h-8 w-8 shrink-0 rounded-lg ring-1 ring-inset ring-stone-300" style={{ backgroundColor: HEX.test(s.hex) ? s.hex : 'transparent' }} />
                 <span className="min-w-0">
                   <span className="block truncate text-sm font-medium leading-5 text-stone-900">{s.name}</span>
                   <span className="block font-mono text-xs uppercase text-stone-600">{s.hex}</span>

@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertTriangle, RotateCw } from 'lucide-react';
+import { AlertTriangle } from 'lucide-react';
 
 /**
  * Small design kit for the redesigned screens (shadcn-style: unstyled-by-default
@@ -129,7 +129,7 @@ export function ProgressBar({
   tone?: Exclude<Tone, 'neutral'>;
   className?: string;
 }) {
-  const pct = Math.max(0, Math.min(100, Math.round(value)));
+  const pct = Number.isFinite(value) ? Math.max(0, Math.min(100, Math.round(value))) : 0;
   const fill = tone === 'good' ? 'bg-[#4A6B53]' : tone === 'warn' ? 'bg-amber-600' : 'bg-rose-600';
   return (
     <div
@@ -186,14 +186,17 @@ export function ErrorState({
   body,
   onRetry,
   retryLabel = 'Try again',
+  announce = true,
 }: {
   title: string;
   body: string;
   onRetry?: () => void;
   retryLabel?: string;
+  /** Set false when another live alert already announces the same problem. */
+  announce?: boolean;
 }) {
   return (
-    <div role="alert" className="flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 p-4">
+    <div role={announce ? 'alert' : undefined} className="flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 p-4">
       <AlertTriangle aria-hidden="true" className="h-5 w-5 shrink-0 text-rose-700 mt-0.5" />
       <div className="min-w-0 flex-1 space-y-1">
         <p className="text-sm font-semibold text-rose-900 leading-5">{title}</p>
@@ -201,7 +204,7 @@ export function ErrorState({
       </div>
       {onRetry && (
         <Button variant="secondary" onClick={onRetry} className="shrink-0 !h-8 !px-3">
-          <RotateCw aria-hidden="true" className="h-3.5 w-3.5" /> {retryLabel}
+          {retryLabel}
         </Button>
       )}
     </div>
