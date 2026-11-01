@@ -30,12 +30,24 @@ function findAmounts(text: string): Amount[] {
   return out;
 }
 
+/** Split into clauses (lines, sentences, `;`) so a percentage is only ever matched to a label in its OWN clause. */
+function clauses(text: string): string[] {
+  // `.` only splits when followed by whitespace/end, so decimals like "8.5%" stay intact.
+  return text.split(/\n|;|\.(?=\s|$)/).map((c) => c.trim()).filter(Boolean);
+}
+
 function pct(text: string, labels: RegExp): number | null {
-  // "service charge 20%", "20% service charge", "gratuity of 18 %"
-  const before = new RegExp(`(?:${labels.source})[^\\n\\d%$]{0,25}?(\\d{1,2}(?:\\.\\d+)?)\\s*%`, 'i').exec(text);
-  if (before) return Number(before[1]);
-  const after = new RegExp(`(\\d{1,2}(?:\\.\\d+)?)\\s*%\\s*(?:mandatory\\s+|automatic\\s+)?(?:${labels.source})`, 'i').exec(text);
-  if (after) return Number(after[1]);
+  const label = labels.source;
+  // "20% service charge", "21% mandatory studio service charge", "4% Lead Florist Gratuity" (<= 4 filler words)
+  const after = new RegExp(`(\\d{1,2}(?:\\.\\d+)?)\\s*%\\s*(?:(?:mandatory|automatic|studio|production|rigging|lead|california|state|local|city|venue|house)\\s+|[A-Za-z&/-]+\\s+){0,4}?(?:${label})`, 'i');
+  // "service charge 20%", "gratuity of 18 %"
+  const before = new RegExp(`(?:${label})[^\\n\\d%$]{0,25}?(\\d{1,2}(?:\\.\\d+)?)\\s*%`, 'i');
+  for (const clause of clauses(text)) {
+    const a = after.exec(clause);
+    if (a) return Number(a[1]);
+    const b = before.exec(clause);
+    if (b) return Number(b[1]);
+  }
   return null;
 }
 
@@ -61,8 +73,8 @@ export function parseQuoteText(
         : 0;
 
   const svc = pct(text, /service\s*(?:charge|fee)|admin(?:istration)?\s*fee|production\s*fee|management\s*fee/) ?? 0;
-  const grat = pct(text, /gratuity|tip|staff\s*charge/) ?? 0;
-  const tax = pct(text, /(?:sales\s*)?tax|vat|gst/) ?? 0;
+  const grat = pct(text, /gratuity|\btips?\b|staff\s*charge/) ?? 0;
+  const tax = pct(text, /(?:sales\s*)?\btax(?:es)?\b|\b(?:vat|gst)\b/) ?? 0;
 
   const total = Math.round(base * (1 + (svc + grat + tax) / 100) * 100) / 100;
 
